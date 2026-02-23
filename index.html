@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Truck RPM Controller</title>
+    <style>
+        :root { --bg: #1a1a1a; --blue: #007aff; --red: #ff3b30; --green: #34c759; --orange: #ff9500; }
+        body { font-family: -apple-system, sans-serif; background: var(--bg); margin: 0; padding: 10px; color: white; display: flex; justify-content: center; overflow: hidden; }
+        .container { width: 100%; max-width: 360px; display: flex; flex-direction: column; align-items: center; gap: 15px; }
+        
+        .status-header { display: flex; flex-direction: column; align-items: center; gap: 5px; width: 100%; }
+        .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--red); display: inline-block; }
+        .dot.connected { background: var(--green); }
+        
+        /* 게이지 배경을 바늘 크기에 맞춰 축소 */
+        .gauge-outer { 
+            position: relative;
+            width: 280px; height: 280px; 
+            border-radius: 50%; 
+            background: #2c2c2e; 
+            display: flex; justify-content: center; align-items: center;
+            box-shadow: inset 0 0 15px rgba(0,0,0,0.5), 0 5px 15px rgba(0,0,0,0.3);
+            border: 2px solid #3a3a3c;
+        }
+        canvas { width: 270px; height: 270px; }
+        
+        .demand-box { text-align: center; margin-top: 5px; }
+        .label { font-size: 11px; color: #8e8e93; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
+        .demand-value { font-size: 32px; font-weight: bold; font-family: 'Courier New', monospace; color: var(--blue); }
+
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: 100%; }
+        .gp-btn { height: 80px; border: none; border-radius: 15px; color: white; font-size: 15px; font-weight: bold; cursor: pointer; transition: transform 0.1s; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; }
+        .gp-btn:active { transform: scale(0.95); }
+        .gp-btn:disabled { opacity: 0.15; filter: grayscale(1); }
+        
+        .resume { background: linear-gradient(to bottom, #34c759, #28a745); }
+        .stop { background: linear-gradient(to bottom, #ff3b30, #d72323); }
+        .up { background: linear-gradient(to bottom, #007aff, #0056b3); }
+        .down { background: linear-gradient(to bottom, #ff9500, #e67e00); }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="status-header">
+        <div style="display:flex; align-items:center; gap:6px;">
+            <div id="statusDot" class="dot"></div>
+            <span id="statusText" style="font-size:12px; color:#8e8e93;">Disconnected</span>
+        </div>
+        <button id="connBtn" onclick="toggleConnect()" style="padding:5px 12px; border-radius:12px; border:none; background:#3a3a3c; color:white; font-size:11px;">Connect</button>
+    </div>
+
+    <div class="gauge-outer">
+        <canvas id="gaugeCanvas" width="540" height="540"></canvas>
+    </div>
+
+    <div class="demand-box">
+        <div class="label">Target Demand</div>
+        <div id="demandText" class="demand-value">0</div>
+        <span style="font-size:10px; color:#666;">RPM</span>
+    </div>
+
+    <div class="grid">
+        <button id="btnResume" class="gp-btn resume" onclick="handleResume()">▶ RESUME</button>
+        <button id="btnUp" class="gp-btn up" onmousedown="startTimer('up')" onmouseup="stopTimer()" ontouchstart="startTimer('up')" ontouchend="stopTimer()" disabled>▲ UP</button>
+        <button id="btnStop" class="gp-btn stop" onclick="handleStop()" disabled>■ STOP</button>
+        <button id="btnDown" class="gp-btn down" onmousedown="startTimer('down')" onmouseup="stopTimer()" ontouchstart="startTimer('down')" ontouchend="stopTimer()" disabled>▼ DOWN</button>
+    </div>
+</div>
+
+<script>
+    let device, characteristic;
+    let isConnected = false, isRunning = false, isStopping = false;
+    let currentRPM = 0, demandRPM = 0;
+    let timer;
+
+    const canvas = document.getElementById('gaugeCanvas');
+    const ctx = canvas.getContext('2d');
+    const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+    const CHAR_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+
+    function drawGauge() {
+        const x = 270, y = 270, radius = 245; // 반지름을 키우고 캔버스 크기에 맞춤
+        ctx.clearRect(0, 0, 540, 540);
+
+        // 눈금 그리기
+        for (let i = 0; i <= 12; i++) {
+            const angle = (210 + (i * 20)) * Math.PI / 180;
+            const isMajor = i % 3 === 0;
+            ctx.beginPath();
+            ctx.strokeStyle = isMajor ? "#fff" : "#555";
+            ctx.lineWidth = isMajor ? 4 : 2;
+            ctx.moveTo(x + (radius - (isMajor ? 30 : 15)) * Math.cos(angle), y + (radius - (isMajor ? 30 : 15)) * Math.sin(angle));
+            ctx.lineTo(x + radius * Math.cos(angle), y + radius * Math.sin(angle));
+            ctx.stroke();
+
+            if (isMajor) {
+                ctx.fillStyle = "#fff";
+                ctx.font = "bold 28px sans-serif";
+                ctx.textAlign = "center";
+                const labelVal = (i / 12) * 3000;
+                const lx = x + (radius - 60) * Math.cos(angle);
+                const ly = x + (radius - 60) * Math.sin(angle) + 10;
+                ctx.fillText(labelVal, lx, ly);
+            }
+        }
+
+        // Demand Arc
+        const demandEndAngle = (210 + (demandRPM / 3000 * 240)) * Math.PI / 180;
+        ctx.beginPath();
+        ctx.strokeStyle = demandRPM >= 1800 ? "rgba(255,59,48,0.4)" : "rgba(0,122,255,0.4)";
+        ctx.lineWidth = 15;
+        ctx.arc(x, y, radius - 10, 210 * Math.PI / 180, demandEndAngle);
+        ctx.stroke();
+
+        // Needle (바늘 길이를 외곽선에 거의 닿게 조절)
+        const needleAngle = (210 + (currentRPM / 3000 * 240)) * Math.PI / 180;
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(needleAngle);
+        ctx.beginPath();
+        ctx.fillStyle = "#ff3b30";
+        ctx.moveTo(-10, 0); 
+        ctx.lineTo(0, -4); 
+        ctx.lineTo(radius - 5, 0); 
+        ctx.lineTo(0, 4);
+        ctx.fill();
+        ctx.restore();
+
+        // Center Cap
+        ctx.beginPath();
+        ctx.fillStyle = "#fff";
+        ctx.arc(x, y, 8, 0, Math.PI * 2);
+        ctx.fill();
+
+        requestAnimationFrame(drawGauge);
+    }
+
+    async function toggleConnect() {
+        if (isConnected) { device.gatt.disconnect(); }
+        else {
+            try {
+                device = await navigator.bluetooth.requestDevice({
+                    filters: [{ name: 'CrowPanel_CAN_HMI' }],
+                    optionalServices: [SERVICE_UUID]
+                });
+                const server = await device.gatt.connect();
+                const service = await server.getPrimaryService(SERVICE_UUID);
+                characteristic = await service.getCharacteristic(CHAR_UUID);
+                await characteristic.startNotifications();
+                characteristic.addEventListener('characteristicvaluechanged', (e) => {
+                    currentRPM = e.target.value.getUint16(0, true);
+                    // Stop 상태에서 RPM이 충분히 낮아지면 Resume 활성화
+                    if (isStopping && currentRPM <= 700) {
+                        forceResetStates();
+                    }
+                });
+                isConnected = true; updateUI();
+            } catch (e) { console.log(e); }
+        }
+    }
+
+    // 상태 강제 리셋 (Resume 버튼 활성화를 위함)
+    function forceResetStates() {
+        isRunning = false;
+        isStopping = false;
+        demandRPM = 0;
+        updateUI();
+    }
+
+    function updateUI() {
+        document.getElementById('statusDot').className = isConnected ? "dot connected" : "dot";
+        document.getElementById('statusText').innerText = isConnected ? "Connected" : "Disconnected";
+        document.getElementById('demandText').innerText = Math.floor(demandRPM);
+        
+        // 버튼 로직 수정
+        document.getElementById('btnResume').disabled = !isConnected || isRunning; 
+        document.getElementById('btnStop').disabled = !isConnected || !isRunning || isStopping;
+        document.getElementById('btnUp').disabled = !isConnected || !isRunning || isStopping;
+        document.getElementById('btnDown').disabled = !isConnected || !isRunning || isStopping;
+    }
+
+    async function sendDemand() {
+        if (characteristic) {
+            let val = Math.floor(demandRPM);
+            let buffer = new Uint8Array([val & 0xFF, (val >> 8) & 0xFF]);
+            await characteristic.writeValue(buffer);
+        }
+    }
+
+    function handleResume() { 
+        if (!isConnected) return;
+        isRunning = true; 
+        isStopping = false;
+        demandRPM = 1000; 
+        sendDemand(); 
+        updateUI(); 
+    }
+
+    function handleStop() { 
+        isStopping = true; 
+        demandRPM = 600; 
+        sendDemand(); 
+        updateUI();
+        // 블루투스 응답이 없더라도 3초 후에는 강제로 Resume 버튼을 풀도록 안전장치 추가
+        setTimeout(() => { if(isStopping) forceResetStates(); }, 3000);
+    }
+
+    function changeRPM(dir) {
+        if (!isRunning || isStopping) return;
+        demandRPM = dir === 'up' ? Math.min(demandRPM + 25, 2000) : Math.max(demandRPM - 25, 1000);
+        sendDemand(); updateUI();
+    }
+    function startTimer(dir) { changeRPM(dir); timer = setInterval(() => changeRPM(dir), 200); }
+    function stopTimer() { clearInterval(timer); }
+
+    drawGauge();
+</script>
+</body>
+</html>
