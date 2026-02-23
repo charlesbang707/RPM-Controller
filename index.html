@@ -13,7 +13,6 @@
         .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--red); display: inline-block; }
         .dot.connected { background: var(--green); }
         
-        /* 게이지 배경을 바늘 크기에 맞춰 축소 */
         .gauge-outer { 
             position: relative;
             width: 280px; height: 280px; 
@@ -80,13 +79,18 @@
     const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
     const CHAR_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
 
+    // 각도 설정: 8시(150도) ~ 4시(390도)
+    const START_DEG = 150;
+    const END_DEG = 390;
+    const RANGE_DEG = END_DEG - START_DEG;
+
     function drawGauge() {
-        const x = 270, y = 270, radius = 245; // 반지름을 키우고 캔버스 크기에 맞춤
+        const x = 270, y = 270, radius = 245;
         ctx.clearRect(0, 0, 540, 540);
 
-        // 눈금 그리기
+        // 눈금 그리기 (8시부터 4시까지)
         for (let i = 0; i <= 12; i++) {
-            const angle = (210 + (i * 20)) * Math.PI / 180;
+            const angle = (START_DEG + (i * (RANGE_DEG / 12))) * Math.PI / 180;
             const isMajor = i % 3 === 0;
             ctx.beginPath();
             ctx.strokeStyle = isMajor ? "#fff" : "#555";
@@ -99,23 +103,23 @@
                 ctx.fillStyle = "#fff";
                 ctx.font = "bold 28px sans-serif";
                 ctx.textAlign = "center";
-                const labelVal = (i / 12) * 3000;
+                const labelVal = Math.round((i / 12) * 3000);
                 const lx = x + (radius - 60) * Math.cos(angle);
                 const ly = x + (radius - 60) * Math.sin(angle) + 10;
                 ctx.fillText(labelVal, lx, ly);
             }
         }
 
-        // Demand Arc
-        const demandEndAngle = (210 + (demandRPM / 3000 * 240)) * Math.PI / 180;
+        // Target Demand Arc (목표치 표시선)
+        const demandEndAngle = (START_DEG + (demandRPM / 3000 * RANGE_DEG)) * Math.PI / 180;
         ctx.beginPath();
         ctx.strokeStyle = demandRPM >= 1800 ? "rgba(255,59,48,0.4)" : "rgba(0,122,255,0.4)";
         ctx.lineWidth = 15;
-        ctx.arc(x, y, radius - 10, 210 * Math.PI / 180, demandEndAngle);
+        ctx.arc(x, y, radius - 10, START_DEG * Math.PI / 180, demandEndAngle);
         ctx.stroke();
 
-        // Needle (바늘 길이를 외곽선에 거의 닿게 조절)
-        const needleAngle = (210 + (currentRPM / 3000 * 240)) * Math.PI / 180;
+        // Needle (바늘)
+        const needleAngle = (START_DEG + (currentRPM / 3000 * RANGE_DEG)) * Math.PI / 180;
         ctx.save();
         ctx.translate(x, y);
         ctx.rotate(needleAngle);
@@ -128,7 +132,7 @@
         ctx.fill();
         ctx.restore();
 
-        // Center Cap
+        // Center Cap (바늘 중앙점)
         ctx.beginPath();
         ctx.fillStyle = "#fff";
         ctx.arc(x, y, 8, 0, Math.PI * 2);
@@ -151,30 +155,19 @@
                 await characteristic.startNotifications();
                 characteristic.addEventListener('characteristicvaluechanged', (e) => {
                     currentRPM = e.target.value.getUint16(0, true);
-                    // Stop 상태에서 RPM이 충분히 낮아지면 Resume 활성화
-                    if (isStopping && currentRPM <= 700) {
-                        forceResetStates();
-                    }
+                    if (isStopping && currentRPM <= 700) { forceResetStates(); }
                 });
                 isConnected = true; updateUI();
             } catch (e) { console.log(e); }
         }
     }
 
-    // 상태 강제 리셋 (Resume 버튼 활성화를 위함)
-    function forceResetStates() {
-        isRunning = false;
-        isStopping = false;
-        demandRPM = 0;
-        updateUI();
-    }
+    function forceResetStates() { isRunning = false; isStopping = false; demandRPM = 0; updateUI(); }
 
     function updateUI() {
         document.getElementById('statusDot').className = isConnected ? "dot connected" : "dot";
         document.getElementById('statusText').innerText = isConnected ? "Connected" : "Disconnected";
         document.getElementById('demandText').innerText = Math.floor(demandRPM);
-        
-        // 버튼 로직 수정
         document.getElementById('btnResume').disabled = !isConnected || isRunning; 
         document.getElementById('btnStop').disabled = !isConnected || !isRunning || isStopping;
         document.getElementById('btnUp').disabled = !isConnected || !isRunning || isStopping;
@@ -191,19 +184,12 @@
 
     function handleResume() { 
         if (!isConnected) return;
-        isRunning = true; 
-        isStopping = false;
-        demandRPM = 1000; 
-        sendDemand(); 
-        updateUI(); 
+        isRunning = true; isStopping = false;
+        demandRPM = 1000; sendDemand(); updateUI(); 
     }
 
     function handleStop() { 
-        isStopping = true; 
-        demandRPM = 600; 
-        sendDemand(); 
-        updateUI();
-        // 블루투스 응답이 없더라도 3초 후에는 강제로 Resume 버튼을 풀도록 안전장치 추가
+        isStopping = true; demandRPM = 600; sendDemand(); updateUI();
         setTimeout(() => { if(isStopping) forceResetStates(); }, 3000);
     }
 
