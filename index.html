@@ -165,11 +165,17 @@
             characteristic = await service.getCharacteristic(CHAR_UUID);
             
             await characteristic.startNotifications();
+            // ESP32에서 보내는 2바이트 RPM 데이터를 읽어 바늘을 움직임
             characteristic.addEventListener('characteristicvaluechanged', (e) => {
-                currentRPM = e.target.value.getUint16(0, true);
-                if (isStopping && currentRPM <= 700) { forceResetStates(); }
+                let rawData = e.target.value;
+                currentRPM = rawData.getUint16(0, true); // Little Endian으로 읽기
+                
+                // Stop 시퀀스 자동 종료 체크
+                if (isStopping && currentRPM <= 700) { 
+                    forceResetStates(); 
+                }
             });
-
+            
             isConnected = true;
             updateUI();
         } catch (e) {
