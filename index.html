@@ -5,20 +5,24 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Truck Control</title>
     <style>
-        body { background: #121212; color: white; font-family: sans-serif; text-align: center; margin: 0; padding: 20px; }
-        .gauge-box { position: relative; width: 320px; height: 320px; margin: 0 auto; }
-        canvas { width: 320px; height: 320px; }
-        .val-text { font-size: 45px; font-weight: bold; color: #007aff; margin: 10px 0; font-family: monospace; }
-        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; max-width: 320px; margin: 0 auto; }
-        button { height: 70px; border-radius: 18px; border: none; font-size: 18px; font-weight: bold; color: white; background: #2c2c2e; }
-        .res { background: #34c759; } .stp { background: #ff3b30; } .up { background: #007aff; } .dn { background: #ff9500; }
-        .scan-btn { background: #007aff; padding: 12px 30px; border-radius: 30px; margin-bottom: 20px; }
+        body { background: #1a1a1a; color: white; font-family: -apple-system, sans-serif; text-align: center; margin: 0; padding: 20px; }
+        .gauge-box { position: relative; width: 340px; height: 340px; margin: 0 auto; }
+        canvas { width: 340px; height: 340px; }
+        .val-text { font-size: 48px; font-weight: bold; color: #007aff; font-family: 'Courier New', monospace; margin: 5px 0; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; max-width: 340px; margin: 20px auto; }
+        button { height: 75px; border-radius: 20px; border: none; font-size: 18px; font-weight: bold; color: white; background: #2c2c2e; }
+        .res { background: linear-gradient(#34c759, #28a745); }
+        .stp { background: linear-gradient(#ff3b30, #d72323); }
+        .up { background: linear-gradient(#007aff, #0056b3); }
+        .dn { background: linear-gradient(#ff9500, #e67e00); }
+        .scan-btn { background: #444; padding: 10px 25px; border-radius: 25px; margin-bottom: 20px; border: 1px solid #666; color: #ccc; }
     </style>
 </head>
 <body>
-    <button class="scan-btn" onclick="connect()">Connect BLE</button>
-    <div class="gauge-box"><canvas id="gauge" width="640" height="640"></canvas></div>
+    <button class="scan-btn" onclick="connect()">Connect Device</button>
+    <div class="gauge-box"><canvas id="gauge" width="680" height="680"></canvas></div>
     <div id="targetDisplay" class="val-text">0</div>
+    <div style="font-size: 12px; color: #666; margin-bottom: 15px;">TARGET RPM</div>
     <div class="grid">
         <button class="res" onclick="send(1000)">RESUME</button>
         <button class="up" onclick="adjust(50)">UP</button>
@@ -33,45 +37,44 @@
     const ctx = canvas.getContext('2d');
 
     function draw() {
-        ctx.clearRect(0, 0, 640, 640);
-        const x = 320, y = 320, r = 260;
+        ctx.clearRect(0, 0, 680, 680);
+        const x = 340, y = 340, r = 280;
 
-        // 1. 외곽 가이드 라인
-        ctx.strokeStyle = "#333"; ctx.lineWidth = 20; ctx.lineCap = "round";
-        ctx.beginPath(); ctx.arc(x, y, r, 0.75 * Math.PI, 2.25 * Math.PI); ctx.stroke();
+        // 1. 외곽 베젤
+        ctx.strokeStyle = "#333"; ctx.lineWidth = 25; ctx.beginPath();
+        ctx.arc(x, y, r, 0.75 * Math.PI, 2.25 * Math.PI); ctx.stroke();
 
-        // 2. 파란색 목표(Demand) 아크
-        if (tarRPM > 0) {
+        // 2. 목표 RPM 블루 아크
+        if (tarRPM > 600) {
             let tarAngle = (0.75 + (tarRPM / 3000) * 1.5) * Math.PI;
-            ctx.strokeStyle = "rgba(0, 122, 255, 0.6)"; ctx.lineWidth = 20;
+            ctx.strokeStyle = "rgba(0, 122, 255, 0.6)"; ctx.lineWidth = 25;
             ctx.beginPath(); ctx.arc(x, y, r, 0.75 * Math.PI, tarAngle); ctx.stroke();
         }
 
         // 3. 눈금과 숫자
-        ctx.font = "bold 26px Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.font = "bold 28px Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
         for (let i = 0; i <= 30; i++) {
             let ang = (0.75 + (i / 30) * 1.5) * Math.PI;
             let isMajor = i % 5 === 0;
-            ctx.strokeStyle = isMajor ? "white" : "#666";
-            ctx.lineWidth = isMajor ? 4 : 2;
+            ctx.strokeStyle = isMajor ? "#fff" : "#555";
+            ctx.lineWidth = isMajor ? 5 : 2;
             ctx.beginPath();
             ctx.moveTo(x + (r-10)*Math.cos(ang), y + (r-10)*Math.sin(ang));
-            ctx.lineTo(x + (r-30)*Math.cos(ang), y + (r-30)*Math.sin(ang));
+            ctx.lineTo(x + (r-35)*Math.cos(ang), y + (r-35)*Math.sin(ang));
             ctx.stroke();
             if (isMajor) {
-                ctx.fillStyle = "white";
-                ctx.fillText(i * 100, x + (r-70)*Math.cos(ang), y + (r-70)*Math.sin(ang));
+                ctx.fillStyle = "#fff";
+                ctx.fillText(i * 100, x + (r-75)*Math.cos(ang), y + (r-75)*Math.sin(ang));
             }
         }
 
-        // 4. 빨간색 바늘 (현재 RPM)
+        // 4. 현재 RPM 레드 바늘
         let needleAng = (0.75 + (curRPM / 3000) * 1.5) * Math.PI;
-        ctx.strokeStyle = "#ff3b30"; ctx.lineWidth = 10; ctx.lineCap = "round";
+        ctx.strokeStyle = "#ff3b30"; ctx.lineWidth = 12; ctx.lineCap = "round";
         ctx.beginPath(); ctx.moveTo(x, y);
-        ctx.lineTo(x + (r-40)*Math.cos(needleAng), y + (r-40)*Math.sin(needleAng)); ctx.stroke();
+        ctx.lineTo(x + (r-50)*Math.cos(needleAng), y + (r-50)*Math.sin(needleAng)); ctx.stroke();
         
-        // 중심점
-        ctx.fillStyle = "white"; ctx.beginPath(); ctx.arc(x, y, 15, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(x, y, 18, 0, 7); ctx.fill();
         requestAnimationFrame(draw);
     }
 
@@ -90,7 +93,7 @@
                 tarRPM = v.getUint16(2, true);
                 document.getElementById('targetDisplay').innerText = tarRPM;
             });
-        } catch (e) { alert(e); }
+        } catch (e) { alert("연결 실패: " + e); }
     }
 
     async function send(v) { if(char) await char.writeValue(new Uint8Array([v & 0xFF, (v >> 8) & 0xFF])); }
