@@ -3,103 +3,95 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Truck RPM Control</title>
+    <title>Truck RPM</title>
     <style>
-        body { font-family: sans-serif; background: #1a1a1a; color: white; text-align: center; margin: 0; padding: 20px; overflow: hidden; }
-        .gauge-container { position: relative; width: 300px; height: 300px; margin: 0 auto; }
-        canvas { width: 300px; height: 300px; }
-        .value-display { font-size: 40px; font-weight: bold; color: #007aff; margin: 10px 0; font-family: monospace; }
-        .btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; max-width: 320px; margin: 20px auto; }
-        button { height: 60px; border-radius: 12px; border: none; font-size: 18px; font-weight: bold; color: white; background: #333; }
-        .btn-resume { background: #34c759; } .btn-stop { background: #ff3b30; } .btn-up { background: #007aff; } .btn-down { background: #ff9500; }
-        button:disabled { opacity: 0.2; }
-        .scan-btn { background: #007aff; padding: 10px 20px; border-radius: 20px; margin-bottom: 20px; }
+        body { background: #121212; color: white; font-family: sans-serif; text-align: center; margin: 0; padding: 20px; }
+        .gauge-box { position: relative; width: 320px; height: 320px; margin: 0 auto; }
+        canvas { width: 320px; height: 320px; }
+        .info { margin: 15px 0; }
+        .val { font-size: 42px; font-weight: bold; color: #007aff; font-family: monospace; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; max-width: 320px; margin: 0 auto; }
+        button { height: 65px; border-radius: 15px; border: none; font-size: 18px; font-weight: bold; color: white; background: #2c2c2e; }
+        .res { background: #34c759; } .stp { background: #ff3b30; } .up { background: #007aff; } .dn { background: #ff9500; }
+        button:active { filter: brightness(1.2); transform: scale(0.98); }
     </style>
 </head>
 <body>
-    <button class="scan-btn" onclick="connectBLE()">Scan Devices</button>
-    <div id="status">Not Connected</div>
-
-    <div class="gauge-container">
-        <canvas id="gauge" width="600" height="600"></canvas>
-    </div>
-
-    <div style="color: #8e8e93; font-size: 14px;">TARGET RPM</div>
-    <div id="demandVal" class="value-display">0</div>
-
-    <div class="btn-grid">
-        <button id="resume" class="btn-resume" onclick="sendCmd(1000)">RESUME</button>
-        <button id="up" class="btn-up" onclick="adj(50)">UP</button>
-        <button id="stop" class="btn-stop" onclick="sendCmd(600)">STOP</button>
-        <button id="down" class="btn-down" onclick="adj(-50)">DOWN</button>
+    <button onclick="conn()" style="background:#007aff; padding:10px 20px; border-radius:20px; margin-bottom:20px;">Connect Truck</button>
+    <div class="gauge-box"><canvas id="gauge" width="640" height="640"></canvas></div>
+    <div class="info"><div style="color:#8e8e93; font-size:12px;">TARGET RPM</div><div id="dTxt" class="val">0</div></div>
+    <div class="grid">
+        <button class="res" onclick="send(1000)">RESUME</button>
+        <button class="up" onclick="adj(50)">UP</button>
+        <button class="stp" onclick="send(600)">STOP</button>
+        <button class="dn" onclick="adj(-50)">DOWN</button>
     </div>
 
 <script>
-    let characteristic;
-    let currentRPM = 0, demandRPM = 0;
+    let char;
+    let cur = 0, dem = 0;
     const canvas = document.getElementById('gauge');
     const ctx = canvas.getContext('2d');
 
     function draw() {
-        ctx.clearRect(0, 0, 600, 600);
-        const cx = 300, cy = 300, r = 250;
+        ctx.clearRect(0, 0, 640, 640);
+        const x = 320, y = 320, r = 260;
 
-        // 1. 눈금과 숫자 그리기
-        ctx.strokeStyle = "#555"; ctx.lineWidth = 3; ctx.font = "30px Arial"; ctx.fillStyle = "white"; ctx.textAlign = "center";
-        for (let i = 0; i <= 30; i++) {
-            let angle = (0.75 + (i / 30) * 1.5) * Math.PI;
-            let len = (i % 5 === 0) ? 30 : 15;
-            ctx.beginPath();
-            ctx.moveTo(cx + (r-len)*Math.cos(angle), cy + (r-len)*Math.sin(angle));
-            ctx.lineTo(cx + r*Math.cos(angle), cy + r*Math.sin(angle));
-            ctx.stroke();
-            if (i % 5 === 0) {
-                let txt = i * 100;
-                ctx.fillText(txt, cx + (r-60)*Math.cos(angle), cy + (r-60)*Math.sin(angle) + 10);
-            }
+        // 1. 가장자리 외곽 원 (Border)
+        ctx.strokeStyle = "#3a3a3c"; ctx.lineWidth = 15; ctx.beginPath();
+        ctx.arc(x, y, r, 0.75 * Math.PI, 2.25 * Math.PI); ctx.stroke();
+
+        // 2. 목표 RPM 아크 (Demand ARC)
+        if (dem > 0) {
+            let endAng = (0.75 + (dem / 3000) * 1.5) * Math.PI;
+            ctx.strokeStyle = "rgba(0, 122, 255, 0.5)"; ctx.lineWidth = 15; ctx.beginPath();
+            ctx.arc(x, y, r, 0.75 * Math.PI, endAng); ctx.stroke();
         }
 
-        // 2. 바늘 그리기 (Current RPM)
-        let needleAngle = (0.75 + (currentRPM / 3000) * 1.5) * Math.PI;
-        ctx.strokeStyle = "#ff3b30"; ctx.lineWidth = 8; ctx.beginPath();
-        ctx.moveTo(cx, cy);
-        ctx.lineTo(cx + (r-40)*Math.cos(needleAngle), cy + (r-40)*Math.sin(needleAngle));
-        ctx.stroke();
-        
-        ctx.fillStyle = "white"; ctx.beginPath(); ctx.arc(cx,cy,15,0,Math.PI*2); ctx.fill();
+        // 3. 눈금 및 숫자
+        ctx.fillStyle = "white"; ctx.textAlign = "center"; ctx.font = "bold 24px Arial";
+        for (let i = 0; i <= 30; i++) {
+            let ang = (0.75 + (i / 30) * 1.5) * Math.PI;
+            let tick = (i % 5 === 0) ? 25 : 12;
+            ctx.strokeStyle = (i % 5 === 0) ? "#fff" : "#666"; ctx.lineWidth = (i % 5 === 0) ? 4 : 2;
+            ctx.beginPath();
+            ctx.moveTo(x + (r - tick) * Math.cos(ang), y + (r - tick) * Math.sin(ang));
+            ctx.lineTo(x + r * Math.cos(ang), y + r * Math.sin(ang)); ctx.stroke();
+            if (i % 5 === 0) ctx.fillText(i * 100, x + (r - 55) * Math.cos(ang), y + (r - 55) * Math.sin(ang) + 10);
+        }
+
+        // 4. 바늘 (Current RPM)
+        let nAng = (0.75 + (cur / 3000) * 1.5) * Math.PI;
+        ctx.shadowBlur = 10; ctx.shadowColor = "red";
+        ctx.strokeStyle = "#ff3b30"; ctx.lineWidth = 8; ctx.lineCap = "round";
+        ctx.beginPath(); ctx.moveTo(x, y);
+        ctx.lineTo(x + (r - 30) * Math.cos(nAng), y + (r - 30) * Math.sin(nAng)); ctx.stroke();
+        ctx.shadowBlur = 0;
+
+        ctx.fillStyle = "white"; ctx.beginPath(); ctx.arc(x, y, 12, 0, 7); ctx.fill();
         requestAnimationFrame(draw);
     }
 
-    async function connectBLE() {
+    async function conn() {
         try {
-            const device = await navigator.bluetooth.requestDevice({
+            const dev = await navigator.bluetooth.requestDevice({
                 acceptAllDevices: true, optionalServices: ["4fafc201-1fb5-459e-8fcc-c5c9c331914b"]
             });
-            const server = await device.gatt.connect();
-            const service = await server.getPrimaryService("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
-            characteristic = await service.getCharacteristic("beb5483e-36e1-4688-b7f5-ea07361b26a8");
-            
-            await characteristic.startNotifications();
-            characteristic.addEventListener('characteristicvaluechanged', (e) => {
-                let data = e.target.value;
-                if (data.byteLength >= 4) {
-                    currentRPM = data.getUint16(0, true);
-                    demandRPM = data.getUint16(2, true);
-                    document.getElementById('demandVal').innerText = demandRPM;
-                }
+            const srv = await dev.gatt.connect();
+            const svc = await srv.getPrimaryService("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
+            char = await svc.getCharacteristic("beb5483e-36e1-4688-b7f5-ea07361b26a8");
+            await char.startNotifications();
+            char.addEventListener('characteristicvaluechanged', (e) => {
+                let v = e.target.value;
+                cur = v.getUint16(0, true);
+                dem = v.getUint16(2, true);
+                document.getElementById('dTxt').innerText = dem;
             });
-            document.getElementById('status').innerText = "Connected";
-        } catch(e) { alert(e); }
+        } catch (e) { console.log(e); }
     }
 
-    async function sendCmd(val) {
-        if (!characteristic) return;
-        let buf = new Uint8Array([val & 0xFF, (val >> 8) & 0xFF]);
-        await characteristic.writeValue(buf);
-    }
-
-    function adj(v) { demandRPM = Math.max(600, Math.min(2500, demandRPM + v)); sendCmd(demandRPM); }
-
+    async function send(v) { if (char) await char.writeValue(new Uint8Array([v & 0xFF, (v >> 8) & 0xFF])); }
+    function adj(v) { dem = Math.max(600, Math.min(2100, dem + v)); send(dem); }
     draw();
 </script>
 </body>
