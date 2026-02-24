@@ -3,33 +3,32 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Truck RPM</title>
+    <title>Truck Control</title>
     <style>
         body { background: #121212; color: white; font-family: sans-serif; text-align: center; margin: 0; padding: 20px; }
         .gauge-box { position: relative; width: 320px; height: 320px; margin: 0 auto; }
         canvas { width: 320px; height: 320px; }
-        .info { margin: 15px 0; }
-        .val { font-size: 42px; font-weight: bold; color: #007aff; font-family: monospace; }
-        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; max-width: 320px; margin: 0 auto; }
-        button { height: 65px; border-radius: 15px; border: none; font-size: 18px; font-weight: bold; color: white; background: #2c2c2e; }
+        .val-text { font-size: 45px; font-weight: bold; color: #007aff; margin: 10px 0; font-family: monospace; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; max-width: 320px; margin: 0 auto; }
+        button { height: 70px; border-radius: 18px; border: none; font-size: 18px; font-weight: bold; color: white; background: #2c2c2e; }
         .res { background: #34c759; } .stp { background: #ff3b30; } .up { background: #007aff; } .dn { background: #ff9500; }
-        button:active { filter: brightness(1.2); transform: scale(0.98); }
+        .scan-btn { background: #007aff; padding: 12px 30px; border-radius: 30px; margin-bottom: 20px; }
     </style>
 </head>
 <body>
-    <button onclick="conn()" style="background:#007aff; padding:10px 20px; border-radius:20px; margin-bottom:20px;">Connect Truck</button>
+    <button class="scan-btn" onclick="connect()">Connect BLE</button>
     <div class="gauge-box"><canvas id="gauge" width="640" height="640"></canvas></div>
-    <div class="info"><div style="color:#8e8e93; font-size:12px;">TARGET RPM</div><div id="dTxt" class="val">0</div></div>
+    <div id="targetDisplay" class="val-text">0</div>
     <div class="grid">
         <button class="res" onclick="send(1000)">RESUME</button>
-        <button class="up" onclick="adj(50)">UP</button>
+        <button class="up" onclick="adjust(50)">UP</button>
         <button class="stp" onclick="send(600)">STOP</button>
-        <button class="dn" onclick="adj(-50)">DOWN</button>
+        <button class="dn" onclick="adjust(-50)">DOWN</button>
     </div>
 
 <script>
     let char;
-    let cur = 0, dem = 0;
+    let curRPM = 0, tarRPM = 0;
     const canvas = document.getElementById('gauge');
     const ctx = canvas.getContext('2d');
 
@@ -37,61 +36,65 @@
         ctx.clearRect(0, 0, 640, 640);
         const x = 320, y = 320, r = 260;
 
-        // 1. 가장자리 외곽 원 (Border)
-        ctx.strokeStyle = "#3a3a3c"; ctx.lineWidth = 15; ctx.beginPath();
-        ctx.arc(x, y, r, 0.75 * Math.PI, 2.25 * Math.PI); ctx.stroke();
+        // 1. 외곽 가이드 라인
+        ctx.strokeStyle = "#333"; ctx.lineWidth = 20; ctx.lineCap = "round";
+        ctx.beginPath(); ctx.arc(x, y, r, 0.75 * Math.PI, 2.25 * Math.PI); ctx.stroke();
 
-        // 2. 목표 RPM 아크 (Demand ARC)
-        if (dem > 0) {
-            let endAng = (0.75 + (dem / 3000) * 1.5) * Math.PI;
-            ctx.strokeStyle = "rgba(0, 122, 255, 0.5)"; ctx.lineWidth = 15; ctx.beginPath();
-            ctx.arc(x, y, r, 0.75 * Math.PI, endAng); ctx.stroke();
+        // 2. 파란색 목표(Demand) 아크
+        if (tarRPM > 0) {
+            let tarAngle = (0.75 + (tarRPM / 3000) * 1.5) * Math.PI;
+            ctx.strokeStyle = "rgba(0, 122, 255, 0.6)"; ctx.lineWidth = 20;
+            ctx.beginPath(); ctx.arc(x, y, r, 0.75 * Math.PI, tarAngle); ctx.stroke();
         }
 
-        // 3. 눈금 및 숫자
-        ctx.fillStyle = "white"; ctx.textAlign = "center"; ctx.font = "bold 24px Arial";
+        // 3. 눈금과 숫자
+        ctx.font = "bold 26px Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
         for (let i = 0; i <= 30; i++) {
             let ang = (0.75 + (i / 30) * 1.5) * Math.PI;
-            let tick = (i % 5 === 0) ? 25 : 12;
-            ctx.strokeStyle = (i % 5 === 0) ? "#fff" : "#666"; ctx.lineWidth = (i % 5 === 0) ? 4 : 2;
+            let isMajor = i % 5 === 0;
+            ctx.strokeStyle = isMajor ? "white" : "#666";
+            ctx.lineWidth = isMajor ? 4 : 2;
             ctx.beginPath();
-            ctx.moveTo(x + (r - tick) * Math.cos(ang), y + (r - tick) * Math.sin(ang));
-            ctx.lineTo(x + r * Math.cos(ang), y + r * Math.sin(ang)); ctx.stroke();
-            if (i % 5 === 0) ctx.fillText(i * 100, x + (r - 55) * Math.cos(ang), y + (r - 55) * Math.sin(ang) + 10);
+            ctx.moveTo(x + (r-10)*Math.cos(ang), y + (r-10)*Math.sin(ang));
+            ctx.lineTo(x + (r-30)*Math.cos(ang), y + (r-30)*Math.sin(ang));
+            ctx.stroke();
+            if (isMajor) {
+                ctx.fillStyle = "white";
+                ctx.fillText(i * 100, x + (r-70)*Math.cos(ang), y + (r-70)*Math.sin(ang));
+            }
         }
 
-        // 4. 바늘 (Current RPM)
-        let nAng = (0.75 + (cur / 3000) * 1.5) * Math.PI;
-        ctx.shadowBlur = 10; ctx.shadowColor = "red";
-        ctx.strokeStyle = "#ff3b30"; ctx.lineWidth = 8; ctx.lineCap = "round";
+        // 4. 빨간색 바늘 (현재 RPM)
+        let needleAng = (0.75 + (curRPM / 3000) * 1.5) * Math.PI;
+        ctx.strokeStyle = "#ff3b30"; ctx.lineWidth = 10; ctx.lineCap = "round";
         ctx.beginPath(); ctx.moveTo(x, y);
-        ctx.lineTo(x + (r - 30) * Math.cos(nAng), y + (r - 30) * Math.sin(nAng)); ctx.stroke();
-        ctx.shadowBlur = 0;
-
-        ctx.fillStyle = "white"; ctx.beginPath(); ctx.arc(x, y, 12, 0, 7); ctx.fill();
+        ctx.lineTo(x + (r-40)*Math.cos(needleAng), y + (r-40)*Math.sin(needleAng)); ctx.stroke();
+        
+        // 중심점
+        ctx.fillStyle = "white"; ctx.beginPath(); ctx.arc(x, y, 15, 0, Math.PI*2); ctx.fill();
         requestAnimationFrame(draw);
     }
 
-    async function conn() {
+    async function connect() {
         try {
-            const dev = await navigator.bluetooth.requestDevice({
+            const device = await navigator.bluetooth.requestDevice({
                 acceptAllDevices: true, optionalServices: ["4fafc201-1fb5-459e-8fcc-c5c9c331914b"]
             });
-            const srv = await dev.gatt.connect();
-            const svc = await srv.getPrimaryService("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
-            char = await svc.getCharacteristic("beb5483e-36e1-4688-b7f5-ea07361b26a8");
+            const server = await device.gatt.connect();
+            const service = await server.getPrimaryService("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
+            char = await service.getCharacteristic("beb5483e-36e1-4688-b7f5-ea07361b26a8");
             await char.startNotifications();
             char.addEventListener('characteristicvaluechanged', (e) => {
                 let v = e.target.value;
-                cur = v.getUint16(0, true);
-                dem = v.getUint16(2, true);
-                document.getElementById('dTxt').innerText = dem;
+                curRPM = v.getUint16(0, true);
+                tarRPM = v.getUint16(2, true);
+                document.getElementById('targetDisplay').innerText = tarRPM;
             });
-        } catch (e) { console.log(e); }
+        } catch (e) { alert(e); }
     }
 
-    async function send(v) { if (char) await char.writeValue(new Uint8Array([v & 0xFF, (v >> 8) & 0xFF])); }
-    function adj(v) { dem = Math.max(600, Math.min(2100, dem + v)); send(dem); }
+    async function send(v) { if(char) await char.writeValue(new Uint8Array([v & 0xFF, (v >> 8) & 0xFF])); }
+    function adjust(v) { tarRPM = Math.max(600, Math.min(2500, tarRPM + v)); send(tarRPM); }
     draw();
 </script>
 </body>
