@@ -5,24 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Truck Control</title>
     <style>
-        body { background: #1a1a1a; color: white; font-family: -apple-system, sans-serif; text-align: center; margin: 0; padding: 20px; overflow: hidden; }
+        body { background: #121212; color: white; font-family: -apple-system, sans-serif; text-align: center; margin: 0; padding: 20px; overflow: hidden; }
         .gauge-box { position: relative; width: 340px; height: 340px; margin: 0 auto; }
         canvas { width: 340px; height: 340px; }
-        .val-text { font-size: 48px; font-weight: bold; color: #007aff; font-family: 'Courier New', monospace; margin: 5px 0; }
-        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; max-width: 340px; margin: 20px auto; }
-        button { height: 75px; border-radius: 20px; border: none; font-size: 18px; font-weight: bold; color: white; background: #2c2c2e; }
-        .res { background: linear-gradient(#34c759, #28a745); }
-        .stp { background: linear-gradient(#ff3b30, #d72323); }
-        .up { background: linear-gradient(#007aff, #0056b3); }
-        .dn { background: linear-gradient(#ff9500, #e67e00); }
-        .scan-btn { background: #444; padding: 10px 25px; border-radius: 25px; margin-bottom: 10px; border: 1px solid #666; color: #ccc; }
+        .val-text { font-size: 50px; font-weight: bold; color: #007aff; font-family: monospace; margin: 10px 0; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; max-width: 340px; margin: 10px auto; }
+        button { height: 75px; border-radius: 20px; border: none; font-size: 20px; font-weight: bold; color: white; background: #2c2c2e; box-shadow: 0 4px #000; }
+        button:active { transform: translateY(2px); box-shadow: 0 2px #000; }
+        .res { background: #34c759; } .stp { background: #ff3b30; } .up { background: #007aff; } .dn { background: #ff9500; }
+        .scan-btn { background: #444; padding: 10px 25px; border-radius: 25px; margin-bottom: 10px; border: 1px solid #666; }
     </style>
 </head>
 <body>
-    <button class="scan-btn" onclick="connect()">Connect Device</button>
+    <button class="scan-btn" onclick="connect()">CONNECT TRUCK</button>
     <div class="gauge-box"><canvas id="gauge" width="680" height="680"></canvas></div>
     <div id="targetDisplay" class="val-text">0</div>
-    <div style="font-size: 12px; color: #666; margin-bottom: 15px;">TARGET RPM</div>
+    <div style="font-size: 14px; color: #8e8e93;">TARGET RPM</div>
     <div class="grid">
         <button class="res" onclick="send(1000)">RESUME</button>
         <button class="up" onclick="adjust(50)">UP</button>
@@ -44,14 +42,14 @@
         ctx.strokeStyle = "#333"; ctx.lineWidth = 25; ctx.beginPath();
         ctx.arc(x, y, r, 0.75 * Math.PI, 2.25 * Math.PI); ctx.stroke();
 
-        // 2. 목표 RPM 블루 아크
-        if (tarRPM > 600) {
+        // 2. 파란색 목표 아크
+        if (tarRPM >= 1000) {
             let tarAngle = (0.75 + (tarRPM / 3000) * 1.5) * Math.PI;
             ctx.strokeStyle = "rgba(0, 122, 255, 0.6)"; ctx.lineWidth = 25;
             ctx.beginPath(); ctx.arc(x, y, r, 0.75 * Math.PI, tarAngle); ctx.stroke();
         }
 
-        // 3. 눈금과 숫자 (건들지 않음 - 3000RPM 기준)
+        // 3. 눈금과 숫자 (0~3000 유지)
         ctx.font = "bold 28px Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
         for (let i = 0; i <= 30; i++) {
             let ang = (0.75 + (i / 30) * 1.5) * Math.PI;
@@ -64,7 +62,7 @@
             if (isMajor) { ctx.fillStyle = "#fff"; ctx.fillText(i * 100, x + (r-75)*Math.cos(ang), y + (r-75)*Math.sin(ang)); }
         }
 
-        // 4. 현재 RPM 레드 바늘
+        // 4. 빨간 바늘
         let needleAng = (0.75 + (curRPM / 3000) * 1.5) * Math.PI;
         ctx.strokeStyle = "#ff3b30"; ctx.lineWidth = 12; ctx.lineCap = "round";
         ctx.beginPath(); ctx.moveTo(x, y);
@@ -76,12 +74,12 @@
 
     async function connect() {
         try {
-            const device = await navigator.bluetooth.requestDevice({
+            const dev = await navigator.bluetooth.requestDevice({
                 acceptAllDevices: true, optionalServices: ["4fafc201-1fb5-459e-8fcc-c5c9c331914b"]
             });
-            const server = await device.gatt.connect();
-            const service = await server.getPrimaryService("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
-            char = await service.getCharacteristic("beb5483e-36e1-4688-b7f5-ea07361b26a8");
+            const srv = await dev.gatt.connect();
+            const svc = await srv.getPrimaryService("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
+            char = await svc.getCharacteristic("beb5483e-36e1-4688-b7f5-ea07361b26a8");
             await char.startNotifications();
             char.addEventListener('characteristicvaluechanged', (e) => {
                 let v = e.target.value;
@@ -89,15 +87,11 @@
                 tarRPM = v.getUint16(2, true);
                 document.getElementById('targetDisplay').innerText = tarRPM;
             });
-        } catch (e) { console.log(e); }
+        } catch (e) { alert("ERROR: " + e); }
     }
 
     async function send(v) { if(char) await char.writeValue(new Uint8Array([v & 0xFF, (v >> 8) & 0xFF])); }
-    // 범위 제한: 1000 ~ 2500
-    function adjust(v) { 
-        tarRPM = Math.max(1000, Math.min(2500, tarRPM + v)); 
-        send(tarRPM); 
-    }
+    function adjust(v) { tarRPM = Math.max(1000, Math.min(2500, tarRPM + v)); send(tarRPM); }
     draw();
 </script>
 </body>
