@@ -137,7 +137,6 @@
         requestAnimationFrame(drawGauge);
     }
 
-    // 블루투스 장치 탐색 절차를 활성화하는 함수
     async function scanAndConnect() {
         if (isConnected) {
             device.gatt.disconnect();
@@ -145,13 +144,10 @@
         }
 
         try {
-            // UI 업데이트: 스캔 중 상태 표시
             document.getElementById('statusDot').className = "dot scanning";
             document.getElementById('statusText').innerText = "Scanning for devices...";
             document.getElementById('connBtn').innerText = "Searching...";
 
-            // 브라우저의 장치 선택 창을 띄웁니다.
-            // acceptAllDevices: true 를 사용하면 주변의 모든 장치가 리스트에 나옵니다.
             device = await navigator.bluetooth.requestDevice({
                 acceptAllDevices: true,
                 optionalServices: [SERVICE_UUID]
@@ -159,85 +155,12 @@
 
             device.addEventListener('gattserverdisconnected', onDisconnected);
 
-            document.getElementById('statusText').innerText = "Connecting to " + device.name + "...";
+            document.getElementById('statusText').innerText = "Connecting to " + (device.name || "ESP32") + "...";
             const server = await device.gatt.connect();
             const service = await server.getPrimaryService(SERVICE_UUID);
             characteristic = await service.getCharacteristic(CHAR_UUID);
             
             await characteristic.startNotifications();
-            // ESP32에서 보내는 2바이트 RPM 데이터를 읽어 바늘을 움직임
             characteristic.addEventListener('characteristicvaluechanged', (e) => {
                 let rawData = e.target.value;
-                currentRPM = rawData.getUint16(0, true); // Little Endian으로 읽기
-                
-                // Stop 시퀀스 자동 종료 체크
-                if (isStopping && currentRPM <= 700) { 
-                    forceResetStates(); 
-                }
-            });
-            
-            isConnected = true;
-            updateUI();
-        } catch (e) {
-            console.log("Scan cancelled or failed", e);
-            onDisconnected();
-        }
-    }
-
-    function onDisconnected() {
-        isConnected = false;
-        isRunning = false;
-        isStopping = false;
-        updateUI();
-    }
-
-    function forceResetStates() { isRunning = false; isStopping = false; demandRPM = 0; updateUI(); }
-
-    function updateUI() {
-        const dot = document.getElementById('statusDot');
-        const text = document.getElementById('statusText');
-        const btn = document.getElementById('connBtn');
-        
-        dot.className = isConnected ? "dot connected" : "dot";
-        text.innerText = isConnected ? "Connected: " + device.name : "Not Connected";
-        btn.innerText = isConnected ? "Disconnect" : "Scan Devices";
-        btn.style.background = isConnected ? "var(--red)" : "var(--blue)";
-
-        document.getElementById('demandText').innerText = Math.floor(demandRPM);
-        document.getElementById('btnResume').disabled = !isConnected || isRunning; 
-        document.getElementById('btnStop').disabled = !isConnected || !isRunning || isStopping;
-        document.getElementById('btnUp').disabled = !isConnected || !isRunning || isStopping;
-        document.getElementById('btnDown').disabled = !isConnected || !isRunning || isStopping;
-    }
-
-    async function sendDemand() {
-        if (characteristic) {
-            let val = Math.floor(demandRPM);
-            let buffer = new Uint8Array([val & 0xFF, (val >> 8) & 0xFF]);
-            await characteristic.writeValue(buffer);
-        }
-    }
-
-    function handleResume() { 
-        if (!isConnected) return;
-        isRunning = true; isStopping = false;
-        demandRPM = 1000; sendDemand(); updateUI(); 
-    }
-
-    function handleStop() { 
-        isStopping = true; demandRPM = 600; sendDemand(); updateUI();
-        setTimeout(() => { if(isStopping) forceResetStates(); }, 3000);
-    }
-
-    function changeRPM(dir) {
-        if (!isRunning || isStopping) return;
-        demandRPM = dir === 'up' ? Math.min(demandRPM + 25, 2000) : Math.max(demandRPM - 25, 1000);
-        sendDemand(); updateUI();
-    }
-    function startTimer(dir) { changeRPM(dir); timer = setInterval(() => changeRPM(dir), 200); }
-    function stopTimer() { clearInterval(timer); }
-
-    drawGauge();
-</script>
-</body>
-</html>
+                currentRPM = rawData.getUint16(0, true
