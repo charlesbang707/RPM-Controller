@@ -3,73 +3,77 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Truck Control</title>
+    <title>Truck Control Pro</title>
     <style>
-        body { background: #121212; color: white; font-family: -apple-system, sans-serif; text-align: center; margin: 0; padding: 20px; overflow: hidden; }
+        body { background: #121212; color: white; font-family: -apple-system, sans-serif; text-align: center; margin: 0; padding: 20px; overflow: hidden; user-select: none; -webkit-user-select: none; }
         .gauge-box { position: relative; width: 340px; height: 340px; margin: 0 auto; }
         canvas { width: 340px; height: 340px; }
         .val-text { font-size: 50px; font-weight: bold; color: #007aff; font-family: monospace; margin: 10px 0; }
         .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; max-width: 340px; margin: 10px auto; }
-        button { height: 75px; border-radius: 20px; border: none; font-size: 20px; font-weight: bold; color: white; background: #2c2c2e; box-shadow: 0 4px #000; }
-        button:active { transform: translateY(2px); box-shadow: 0 2px #000; }
-        .res { background: #34c759; } .stp { background: #ff3b30; } .up { background: #007aff; } .dn { background: #ff9500; }
-        .scan-btn { background: #444; padding: 10px 25px; border-radius: 25px; margin-bottom: 10px; border: 1px solid #666; }
+        
+        /* 버튼 스타일 및 터치 피드백 */
+        button { height: 75px; border-radius: 20px; border: none; font-size: 20px; font-weight: bold; color: white; background: #2c2c2e; transition: transform 0.1s; }
+        button:active { transform: scale(0.95); opacity: 0.8; }
+        
+        .res { background: #34c759; } 
+        .stp { background: #ff3b30; } 
+        .up { background: #007aff; } 
+        .dn { background: #ff9500; }
+        
+        .scan-btn { background: #444; padding: 10px 25px; border-radius: 25px; margin-bottom: 10px; border: 1px solid #666; font-size: 14px; }
     </style>
 </head>
 <body>
     <button class="scan-btn" onclick="connect()">CONNECT TRUCK</button>
     <div class="gauge-box"><canvas id="gauge" width="680" height="680"></canvas></div>
     <div id="targetDisplay" class="val-text">0</div>
-    <div style="font-size: 14px; color: #8e8e93;">TARGET RPM</div>
+    <div style="font-size: 14px; color: #8e8e93; letter-spacing: 2px;">TARGET RPM</div>
+
     <div class="grid">
         <button class="res" onclick="send(1000)">RESUME</button>
-        <button class="up" onclick="adjust(50)">UP</button>
+        <button class="up" ontouchstart="startAdjust(25)" ontouchend="stopAdjust()" onmousedown="startAdjust(25)" onmouseup="stopAdjust()">UP</button>
         <button class="stp" onclick="send(600)">STOP</button>
-        <button class="dn" onclick="adjust(-50)">DOWN</button>
+        <button class="dn" ontouchstart="startAdjust(-25)" ontouchend="stopAdjust()" onmousedown="startAdjust(-25)" onmouseup="stopAdjust()">DOWN</button>
     </div>
 
 <script>
     let char;
     let curRPM = 0, tarRPM = 0;
+    let adjustInterval = null;
     const canvas = document.getElementById('gauge');
     const ctx = canvas.getContext('2d');
 
-    function draw() {
-        ctx.clearRect(0, 0, 680, 680);
-        const x = 340, y = 340, r = 280;
-
-        // 1. 외곽 베젤
-        ctx.strokeStyle = "#333"; ctx.lineWidth = 25; ctx.beginPath();
-        ctx.arc(x, y, r, 0.75 * Math.PI, 2.25 * Math.PI); ctx.stroke();
-
-        // 2. 파란색 목표 아크
-        if (tarRPM >= 1000) {
-            let tarAngle = (0.75 + (tarRPM / 3000) * 1.5) * Math.PI;
-            ctx.strokeStyle = "rgba(0, 122, 255, 0.6)"; ctx.lineWidth = 25;
-            ctx.beginPath(); ctx.arc(x, y, r, 0.75 * Math.PI, tarAngle); ctx.stroke();
+    // --- 연속 증감 로직 ---
+    function startAdjust(value) {
+        if (!char) return;
+        // 즉시 한 번 실행
+        adjust(value);
+        // 100ms 간격으로 반복 실행 (물리 스위치 느낌)
+        if (!adjustInterval) {
+            adjustInterval = setInterval(() => adjust(value), 100);
         }
+    }
 
-        // 3. 눈금과 숫자 (0~3000 유지)
-        ctx.font = "bold 28px Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-        for (let i = 0; i <= 30; i++) {
-            let ang = (0.75 + (i / 30) * 1.5) * Math.PI;
-            let isMajor = i % 5 === 0;
-            ctx.strokeStyle = isMajor ? "#fff" : "#555"; ctx.lineWidth = isMajor ? 5 : 2;
-            ctx.beginPath();
-            ctx.moveTo(x + (r-10)*Math.cos(ang), y + (r-10)*Math.sin(ang));
-            ctx.lineTo(x + (r-35)*Math.cos(ang), y + (r-35)*Math.sin(ang));
-            ctx.stroke();
-            if (isMajor) { ctx.fillStyle = "#fff"; ctx.fillText(i * 100, x + (r-75)*Math.cos(ang), y + (r-75)*Math.sin(ang)); }
+    function stopAdjust() {
+        if (adjustInterval) {
+            clearInterval(adjustInterval);
+            adjustInterval = null;
         }
+    }
 
-        // 4. 빨간 바늘
-        let needleAng = (0.75 + (curRPM / 3000) * 1.5) * Math.PI;
-        ctx.strokeStyle = "#ff3b30"; ctx.lineWidth = 12; ctx.lineCap = "round";
-        ctx.beginPath(); ctx.moveTo(x, y);
-        ctx.lineTo(x + (r-50)*Math.cos(needleAng), y + (r-50)*Math.sin(needleAng)); ctx.stroke();
-        
-        ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(x, y, 18, 0, 7); ctx.fill();
-        requestAnimationFrame(draw);
+    function adjust(v) { 
+        if (tarRPM === 0 && v > 0) tarRPM = 1000; // IDLE 상태에서 UP 누를 때 대비
+        tarRPM = Math.max(1000, Math.min(2500, tarRPM + v)); 
+        send(tarRPM); 
+    }
+
+    // --- BLE 통신 ---
+    async function send(v) { 
+        if(char) {
+            try {
+                await char.writeValue(new Uint8Array([v & 0xFF, (v >> 8) & 0xFF]));
+            } catch(e) { console.log("Send Error"); }
+        } 
     }
 
     async function connect() {
@@ -90,8 +94,40 @@
         } catch (e) { alert("ERROR: " + e); }
     }
 
-    async function send(v) { if(char) await char.writeValue(new Uint8Array([v & 0xFF, (v >> 8) & 0xFF])); }
-    function adjust(v) { tarRPM = Math.max(1000, Math.min(2500, tarRPM + v)); send(tarRPM); }
+    // --- 게이지 렌더링 (0~3000 유지) ---
+    function draw() {
+        ctx.clearRect(0, 0, 680, 680);
+        const x = 340, y = 340, r = 280;
+
+        ctx.strokeStyle = "#333"; ctx.lineWidth = 25; ctx.beginPath();
+        ctx.arc(x, y, r, 0.75 * Math.PI, 2.25 * Math.PI); ctx.stroke();
+
+        if (tarRPM >= 1000) {
+            let tarAngle = (0.75 + (tarRPM / 3000) * 1.5) * Math.PI;
+            ctx.strokeStyle = "rgba(0, 122, 255, 0.6)"; ctx.lineWidth = 25;
+            ctx.beginPath(); ctx.arc(x, y, r, 0.75 * Math.PI, tarAngle); ctx.stroke();
+        }
+
+        ctx.font = "bold 28px Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        for (let i = 0; i <= 30; i++) {
+            let ang = (0.75 + (i / 30) * 1.5) * Math.PI;
+            let isMajor = i % 5 === 0;
+            ctx.strokeStyle = isMajor ? "#fff" : "#555"; ctx.lineWidth = isMajor ? 5 : 2;
+            ctx.beginPath();
+            ctx.moveTo(x + (r-10)*Math.cos(ang), y + (r-10)*Math.sin(ang));
+            ctx.lineTo(x + (r-35)*Math.cos(ang), y + (r-35)*Math.sin(ang));
+            ctx.stroke();
+            if (isMajor) { ctx.fillStyle = "#fff"; ctx.fillText(i * 100, x + (r-75)*Math.cos(ang), y + (r-75)*Math.sin(ang)); }
+        }
+
+        let needleAng = (0.75 + (curRPM / 3000) * 1.5) * Math.PI;
+        ctx.strokeStyle = "#ff3b30"; ctx.lineWidth = 12; ctx.lineCap = "round";
+        ctx.beginPath(); ctx.moveTo(x, y);
+        ctx.lineTo(x + (r-50)*Math.cos(needleAng), y + (r-50)*Math.sin(needleAng)); ctx.stroke();
+        
+        ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(x, y, 18, 0, 7); ctx.fill();
+        requestAnimationFrame(draw);
+    }
     draw();
 </script>
 </body>
