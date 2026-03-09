@@ -3,42 +3,38 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Truck RPM Control</title>
+    <title>Mack Truck RPM Monitor</title>
     <script src="https://cdn.jsdelivr.net/npm/canvas-gauges@2.1.7/gauge.min.js"></script>
     <style>
         body { background-color: #121212; color: white; font-family: sans-serif; text-align: center; margin: 0; padding: 20px; }
         .status { color: #4CAF50; font-size: 14px; margin-bottom: 10px; }
-        #connectBtn { background-color: #444; color: white; border: none; padding: 10px 30px; border-radius: 8px; font-weight: bold; cursor: pointer; margin-bottom: 20px; }
+        #connectBtn { background-color: #444; color: white; border: none; padding: 12px 35px; border-radius: 8px; font-weight: bold; cursor: pointer; margin-bottom: 20px; }
         .grid-container { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; max-width: 400px; margin: 20px auto; }
         .btn { padding: 25px; border-radius: 12px; font-size: 18px; font-weight: bold; border: none; cursor: pointer; color: white; }
         .resume { background-color: #2ecc71; } .up { background-color: #007bff; }
         .stop { background-color: #e74c3c; } .down { background-color: #f39c12; }
-        .baud-container { margin-top: 20px; display: flex; justify-content: center; gap: 10px; }
-        .baud-btn { background-color: #333; color: #888; border: 1px solid #555; padding: 10px 20px; border-radius: 5px; cursor: pointer; }
-        .baud-btn.active { background-color: #222; color: #007bff; border-color: #007bff; }
-        #baudStatus { font-size: 12px; color: #007bff; margin-top: 10px; }
-        .rpm-text { font-size: 48px; font-weight: bold; color: #007bff; margin-top: -30px; margin-bottom: 20px; }
+        .rpm-text { font-size: 54px; font-weight: bold; color: #007bff; margin-top: -30px; margin-bottom: 10px; }
+        .info-panel { color: #888; font-size: 12px; margin-top: 20px; }
     </style>
 </head>
 <body>
 
-    <div id="status" class="status">연결 안됨</div>
-    <button id="connectBtn">CONNECT</button>
+    <div id="status" class="status">시스템 대기 중 (Bluetooth 전용)</div>
+    <button id="connectBtn">CONNECT TO TRUCK</button>
 
     <canvas id="gauge-rpm"></canvas>
     <div class="rpm-text" id="rpmVal">0</div>
+    <div style="color: #666; margin-bottom: 20px;">REAL-TIME RPM</div>
 
     <div class="grid-container">
         <button class="btn resume" onclick="sendCmd(650)">RESUME</button>
-        <button class="btn up" onclick="sendCmd(1)">UP</button>
+        <button class="btn up" onclick="sendCmd(1)">RPM UP</button>
         <button class="btn stop" onclick="sendCmd(600)">STOP</button>
-        <button class="btn down" onclick="sendCmd(2)">DOWN</button>
+        <button class="btn down" onclick="sendCmd(2)">RPM DOWN</button>
     </div>
 
-    <div id="baudStatus">현재 속도: 확인 중...</div>
-    <div class="baud-container">
-        <button id="btn250" class="baud-btn" onclick="setBaud(250)">250kbps</button>
-        <button id="btn500" class="baud-btn" onclick="setBaud(500)">500kbps</button>
+    <div class="info-panel">
+        Mode: J1939 Standard (250kbps) | Target: Mack/Western Star
     </div>
 
     <script>
@@ -48,15 +44,19 @@
 
         // Gauge 설정
         var gauge = new RadialGauge({
-            renderTo: 'gauge-rpm', width: 300, height: 300, units: "RPM",
+            renderTo: 'gauge-rpm', width: 320, height: 320, units: "RPM",
             minValue: 0, maxValue: 3000,
             majorTicks: ["0","500","1000","1500","2000","2500","3000"],
-            minorTicks: 2, strokeTicks: true,
-            highlights: [{ "from": 0, "to": 1000, "color": "rgba(0,0,255,.3)" }],
-            colorPlate: "#121212", colorMajorTicks: "#ddd", colorMinorTicks: "#666",
+            minorTicks: 5, strokeTicks: true,
+            highlights: [
+                { "from": 0, "to": 600, "color": "rgba(200, 50, 50, .2)" },
+                { "from": 600, "to": 2100, "color": "rgba(0, 255, 0, .15)" },
+                { "from": 2100, "to": 3000, "color": "rgba(255, 0, 0, .3)" }
+            ],
+            colorPlate: "#121212", colorMajorTicks: "#ddd", colorMinorTicks: "#444",
             colorNumbers: "#eee", needleType: "arrow", needleWidth: 3,
             valueBox: false, borderShadowWidth: 0, borders: false,
-            animationDuration: 1500, animationRule: "linear"
+            animationDuration: 100, animationRule: "linear"
         }).draw();
 
         document.getElementById('connectBtn').addEventListener('click', async () => {
@@ -69,59 +69,35 @@
                 const service = await server.getPrimaryService(SERVICE_UUID);
                 characteristic = await service.getCharacteristic(CHAR_UUID);
                 
-                document.getElementById('status').innerText = "연결됨: " + device.name;
+                document.getElementById('status').innerText = "연결 성공: " + device.name;
                 document.getElementById('connectBtn').innerText = "DISCONNECT";
+                document.getElementById('status').style.color = "#2ecc71";
 
                 await characteristic.startNotifications();
-                characteristic.addEventListener('characteristicvaluechanged', handleNotifications);
-                
-                // 연결 시 현재 상태 요청 (더미 데이터 전송)
-                sendCmd(0); 
+                characteristic.addEventListener('characteristicvaluechanged', (event) => {
+                    let data = event.target.value;
+                    if (data.byteLength >= 2) {
+                        let current = data.getUint16(0, true);
+                        gauge.value = current;
+                        document.getElementById('rpmVal').innerText = current;
+                    }
+                });
 
             } catch (error) {
                 console.log(error);
-                alert("연결 실패: " + error);
+                document.getElementById('status').innerText = "연결 오류가 발생했습니다.";
+                document.getElementById('status').style.color = "#e74c3c";
             }
         });
 
-        function handleNotifications(event) {
-            let data = event.target.value;
-            if (data.byteLength === 4) {
-                // RPM 데이터 수신 (Low Byte, High Byte)
-                let current = data.getUint16(0, true);
-                let target = data.getUint16(2, true);
-                gauge.value = current;
-                document.getElementById('rpmVal').innerText = current;
-            } else if (data.byteLength === 2) {
-                // 속도 설정 ACK 수신
-                let ack = data.getUint16(0, true);
-                updateBaudUI(ack);
-            }
-        }
-
-        function updateBaudUI(val) {
-            const btn250 = document.getElementById('btn250');
-            const btn500 = document.getElementById('btn500');
-            const status = document.getElementById('baudStatus');
-
-            if (val === 0x2500) {
-                btn250.classList.add('active'); btn500.classList.remove('active');
-                status.innerText = "현재 속도: 250kbps";
-            } else if (val === 0x5000) {
-                btn500.classList.add('active'); btn250.classList.remove('active');
-                status.innerText = "현재 속도: 500kbps";
-            }
-        }
-
         async function sendCmd(val) {
             if (!characteristic) return;
-            let data = new Uint16Array([val]);
-            await characteristic.writeValue(data);
-        }
-
-        function setBaud(baud) {
-            if (baud === 250) sendCmd(0x2500);
-            else if (baud === 500) sendCmd(0x5000);
+            try {
+                let data = new Uint16Array([val]);
+                await characteristic.writeValue(data);
+            } catch (e) {
+                console.error("전송 실패", e);
+            }
         }
     </script>
 </body>
