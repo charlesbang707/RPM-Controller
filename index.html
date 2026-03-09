@@ -1,180 +1,76 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Truck RPM Control</title>
+    <title>Truck Control</title>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-gauges@2.1.7/gauge.min.js"></script>
     <style>
-        body {
-            background-color: black;
-            color: white;
-            font-family: Arial, sans-serif;
-            text-align: center;
-            padding: 20px;
-            margin: 0;
-        }
-        #connect {
-            background-color: #444;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 20px;
-            font-size: 18px;
-            margin-bottom: 20px;
-        }
-        #gauge {
-            display: block;
-            margin: 0 auto 10px;
-        }
-        #target-value {
-            font-size: 60px;
-            margin: 0;
-        }
-        #target-label {
-            font-size: 18px;
-            margin-bottom: 20px;
-        }
-        .button-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 10px;
-            max-width: 300px;
-            margin: 0 auto;
-        }
-        button.control {
-            color: white;
-            border: none;
-            padding: 15px;
-            border-radius: 10px;
-            font-size: 20px;
-        }
-        #resume { background-color: green; }
-        #up { background-color: blue; }
-        #stop { background-color: red; }
-        #down { background-color: orange; }
+        body { background-color: #121212; color: white; font-family: sans-serif; text-align: center; margin: 0; padding: 20px; }
+        #connectBtn { background-color: #444; color: white; border: none; padding: 20px 40px; border-radius: 20px; font-size: 18px; font-weight: bold; cursor: pointer; margin-top: 20px; margin-bottom: 30px; text-transform: uppercase; }
+        .grid-container { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; max-width: 400px; margin: 20px auto; }
+        .btn { padding: 40px; border-radius: 20px; font-size: 20px; font-weight: bold; border: none; cursor: pointer; color: white; text-transform: uppercase; }
+        .resume { background-color: #2ecc71; } .up { background-color: #007bff; }
+        .stop { background-color: #e74c3c; } .down { background-color: #f39c12; }
+        #rpmVal { font-size: 60px; font-weight: bold; color: #007bff; margin-top: -30px; }
+        .label { font-size: 14px; color: #888; margin-top: 5px; text-transform: uppercase; }
     </style>
 </head>
 <body>
-    <button id="connect">CONNECT TRUCK</button>
-    <canvas id="gauge" width="300" height="200"></canvas>
-    <div id="target-value">0</div>
-    <div id="target-label">Target RPM</div>
-    <div class="button-grid">
-        <button id="resume" class="control">RESUME</button>
-        <button id="up" class="control">UP</button>
-        <button id="stop" class="control">STOP</button>
-        <button id="down" class="control">DOWN</button>
+
+    <button id="connectBtn">CONNECT TRUCK</button>
+
+    <canvas id="gauge-rpm"></canvas>
+    
+    <div id="rpmVal">0</div>
+    <div class="label">TARGET RPM</div>
+
+    <div class="grid-container">
+        <button class="btn resume" onclick="sendCmd(650)">RESUME</button>
+        <button class="btn up" onclick="sendCmd(1)">UP</button>
+        <button class="btn stop" onclick="sendCmd(600)">STOP</button>
+        <button class="btn down" onclick="sendCmd(2)">DOWN</button>
     </div>
 
     <script>
-        let device = null;
-        let characteristic = null;
-        let rxCharacteristic = null;
-        let targetRPM = 0;
+        let device, characteristic;
+        const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+        const CHAR_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
 
-        // Nordic UART Service UUIDs (common for ESP32 BLE serial emulation)
-        const serviceUUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
-        const txUUID = '6e400002-b5a3-f393-e0a9-e50e24dcca9e'; // Write to ESP32
-        const rxUUID = '6e400003-b5a3-f393-e0a9-e50e24dcca9e'; // Notify from ESP32
+        var gauge = new RadialGauge({
+            renderTo: 'gauge-rpm', width: 350, height: 350, units: "",
+            minValue: 0, maxValue: 3000,
+            majorTicks: ["0","500","1000","1500","2000","2500","3000"],
+            colorPlate: "transparent", colorMajorTicks: "#ddd", colorNumbers: "#eee",
+            needleType: "arrow", needleWidth: 4, valueBox: false, borders: false,
+            ticksAngle: 270, startAngle: 45, animation: false
+        }).draw();
 
-        function drawGauge(rpm) {
-            const canvas = document.getElementById('gauge');
-            const ctx = canvas.getContext('2d');
-            const centerX = 150;
-            const centerY = 150;
-            const radius = 100;
-            const minRPM = 0;
-            const maxRPM = 3000;
-
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-            // Draw the gauge arc (upper semi-circle)
-            ctx.beginPath();
-            ctx.arc(centerX, centerY, radius, Math.PI, 0, false); // Clockwise upper semi
-            ctx.strokeStyle = 'gray';
-            ctx.lineWidth = 10;
-            ctx.stroke();
-
-            // Draw tick labels
-            const labels = [500, 1000, 1500, 2000, 2500, 3000];
-            ctx.font = '12px Arial';
-            ctx.fillStyle = 'white';
-            labels.forEach((label) => {
-                const fraction = label / maxRPM;
-                const angle = Math.PI - (Math.PI * fraction);
-                const labelX = centerX + (radius + 15) * Math.cos(angle);
-                const labelY = centerY - (radius + 15) * Math.sin(angle);
-                ctx.fillText(label, labelX - 15, labelY + 5); // Adjust positioning
-            });
-
-            // Draw needle
-            const angle = Math.PI - (Math.PI * (rpm / maxRPM));
-            ctx.beginPath();
-            ctx.moveTo(centerX, centerY);
-            ctx.lineTo(centerX + radius * Math.cos(angle), centerY - radius * Math.sin(angle));
-            ctx.strokeStyle = 'red';
-            ctx.lineWidth = 5;
-            ctx.stroke();
-
-            // Center circle
-            ctx.beginPath();
-            ctx.arc(centerX, centerY, 5, 0, 2 * Math.PI);
-            ctx.fillStyle = 'white';
-            ctx.fill();
-        }
-
-        // Initial draw
-        drawGauge(0);
-
-        // Connect button handler
-        document.getElementById('connect').addEventListener('click', async () => {
+        document.getElementById('connectBtn').addEventListener('click', async () => {
             try {
                 device = await navigator.bluetooth.requestDevice({
-                    filters: [{ services: [serviceUUID] }]
+                    filters: [{ name: "Truck_RPM_Control" }],
+                    optionalServices: [SERVICE_UUID]
                 });
                 const server = await device.gatt.connect();
-                const service = await server.getPrimaryService(serviceUUID);
-                characteristic = await service.getCharacteristic(txUUID);
-
-                // Set up notifications for RPM updates from ESP32
-                rxCharacteristic = await service.getCharacteristic(rxUUID);
-                rxCharacteristic.addEventListener('characteristicvaluechanged', (event) => {
-                    const value = new TextDecoder().decode(event.target.value);
-                    targetRPM = parseInt(value, 10) || targetRPM;
-                    document.getElementById('target-value').textContent = targetRPM;
-                    drawGauge(targetRPM);
+                const service = await server.getPrimaryService(SERVICE_UUID);
+                characteristic = await service.getCharacteristic(CHAR_UUID);
+                
+                document.getElementById('connectBtn').innerText = "CONNECTED";
+                await characteristic.startNotifications();
+                characteristic.addEventListener('characteristicvaluechanged', (e) => {
+                    let val = e.target.value.getUint16(0, true);
+                    gauge.value = val;
+                    document.getElementById('rpmVal').innerText = val;
                 });
-                await rxCharacteristic.startNotifications();
+            } catch (err) { console.log(err); }
+        });
 
-                document.getElementById('connect').textContent = 'CONNECTED';
-                document.getElementById('connect').disabled = true;
-            } catch (error) {
-                console.error('Bluetooth connection failed:', error);
-                alert('Failed to connect: ' + error.message);
+        async function sendCmd(val) {
+            if (characteristic) {
+                await characteristic.writeValue(new Uint16Array([val]));
             }
-        });
-
-        // Button handlers (send commands to ESP32)
-        const commands = {
-            resume: 'RESUME',
-            up: 'UP',
-            down: 'DOWN',
-            stop: 'STOP'
-        };
-
-        Object.keys(commands).forEach((id) => {
-            document.getElementById(id).addEventListener('click', async () => {
-                if (characteristic) {
-                    try {
-                        await characteristic.writeValue(new TextEncoder().encode(commands[id]));
-                    } catch (error) {
-                        console.error('Write failed:', error);
-                    }
-                } else {
-                    alert('Connect to the truck first!');
-                }
-            });
-        });
+        }
     </script>
 </body>
 </html>
