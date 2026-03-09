@@ -14,24 +14,23 @@
         button:active { transform: scale(0.95); background: #3a3a3c; }
         .res { background: #34c759; } .stp { background: #ff3b30; } .up { background: #007aff; } .dn { background: #ff9500; }
         .speed-bar { display: flex; justify-content: center; gap: 10px; margin-top: 20px; }
-        .speed-btn { height: 40px; font-size: 14px; padding: 0 20px; border: 1px solid #444; border-radius: 10px; }
-        .active-speed { border-color: #007aff; background: #007aff; }
+        .speed-btn { height: 45px; font-size: 15px; padding: 0 25px; border: 2px solid #444; border-radius: 12px; background: #1c1c1e; color: #888; }
+        .active-speed { border-color: #007aff; color: white; background: #007aff; }
     </style>
 </head>
 <body>
-    <button onclick="connect()" style="background:#444; height:40px; padding:0 30px; border-radius:10px;">CONNECT</button>
+    <button onclick="connect()" style="background:#444; height:45px; padding:0 35px; border-radius:12px; margin-bottom:10px;">CONNECT</button>
     <div class="gauge-box"><canvas id="gauge" width="680" height="680"></canvas></div>
     <div id="targetDisplay" class="val-text">0</div>
     <div class="grid">
         <button class="res" onclick="send(1000)">RESUME</button>
-        <button class="up" ontouchstart="startAdjust(25)" ontouchend="stopAdjust()" onmousedown="startAdjust(25)" onmouseup="stopAdjust()">UP</button>
+        <button class="up" ontouchstart="startAdjust(25)" ontouchend="stopAdjust()">UP</button>
         <button class="stp" onclick="send(600)">STOP</button>
-        <button class="dn" ontouchstart="startAdjust(-25)" ontouchend="stopAdjust()" onmousedown="startAdjust(-25)" onmouseup="stopAdjust()">DOWN</button>
+        <button class="dn" ontouchstart="startAdjust(-25)" ontouchend="stopAdjust()">DOWN</button>
     </div>
-    
     <div class="speed-bar">
-        <button id="btn250" class="speed-btn active-speed" onclick="changeSpeed(0x2500)">250kbps</button>
-        <button id="btn500" class="speed-btn" onclick="changeSpeed(0x5000)">500kbps</button>
+        <button id="btn250" class="speed-btn active-speed" onclick="send(0x2500)">250kbps</button>
+        <button id="btn500" class="speed-btn" onclick="send(0x5000)">500kbps</button>
     </div>
 
 <script>
@@ -40,15 +39,8 @@
 
     async function send(v) { 
         if(char) {
-            try {
-                await char.writeValue(new Uint8Array([v & 0xFF, (v >> 8) & 0xFF]));
-            } catch(e) { console.log("Send Error"); }
+            try { await char.writeValue(new Uint8Array([v & 0xFF, (v >> 8) & 0xFF])); } catch(e) {}
         }
-    }
-    
-    // 문제의 팝업(confirm) 창을 완전히 제거했습니다. 누르면 즉시 변경 명령이 날아갑니다.
-    function changeSpeed(cmd) {
-        send(cmd);
     }
 
     async function connect() {
@@ -62,23 +54,19 @@
                 let v = e.target.value;
                 curRPM = v.getUint16(0, true);
                 tarRPM = v.getUint16(2, true);
-                
-                if (v.byteLength >= 5) {
-                    let is500 = v.getUint8(4);
-                    document.getElementById('btn500').className = is500 ? "speed-btn active-speed" : "speed-btn";
-                    document.getElementById('btn250').className = !is500 ? "speed-btn active-speed" : "speed-btn";
-                }
-                
+                let is500 = v.getUint8(4);
+                document.getElementById('btn500').className = is500 ? "speed-btn active-speed" : "speed-btn";
+                document.getElementById('btn250').className = !is500 ? "speed-btn active-speed" : "speed-btn";
                 document.getElementById('targetDisplay').innerText = tarRPM;
             });
-            alert("Connected!");
-        } catch (e) { alert("ERROR: " + e); }
+            alert("연결 성공!");
+        } catch (e) { alert("연결 실패: " + e); }
     }
 
     function startAdjust(v) { adjust(v); adjustTimer = setInterval(() => adjust(v), 150); }
     function stopAdjust() { clearInterval(adjustTimer); }
     function adjust(v) { 
-        if (tarRPM === 0 && v > 0) tarRPM = 1000;
+        if(tarRPM === 0 && v > 0) tarRPM = 1000;
         tarRPM = Math.max(1000, Math.min(2500, tarRPM + v)); 
         send(tarRPM); 
     }
@@ -86,43 +74,29 @@
     function draw() {
         ctx.clearRect(0, 0, 680, 680);
         const x = 340, y = 340, r = 280;
+        ctx.strokeStyle = "#333"; ctx.lineWidth = 25; ctx.beginPath(); ctx.arc(x, y, r, 0.75 * Math.PI, 2.25 * Math.PI); ctx.stroke();
         
-        ctx.strokeStyle = "#333"; ctx.lineWidth = 25; ctx.beginPath(); 
-        ctx.arc(x, y, r, 0.75 * Math.PI, 2.25 * Math.PI); ctx.stroke();
-        
-        if (tarRPM >= 1000) {
-            let tarAngle = (0.75 + (tarRPM / 3000) * 1.5) * Math.PI;
-            ctx.strokeStyle = "rgba(0, 122, 255, 0.6)"; ctx.lineWidth = 25;
-            ctx.beginPath(); ctx.arc(x, y, r, 0.75 * Math.PI, tarAngle); ctx.stroke();
-        }
-
+        // 눈금 및 숫자
         ctx.font = "bold 28px Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
         for (let i = 0; i <= 30; i++) {
             let ang = (0.75 + (i / 30) * 1.5) * Math.PI;
             let isMajor = i % 5 === 0;
             ctx.strokeStyle = isMajor ? "#fff" : "#555"; ctx.lineWidth = isMajor ? 5 : 2;
-            
             ctx.beginPath();
             ctx.moveTo(x + (r-10)*Math.cos(ang), y + (r-10)*Math.sin(ang));
             ctx.lineTo(x + (r-35)*Math.cos(ang), y + (r-35)*Math.sin(ang));
             ctx.stroke();
-            
-            if (isMajor) { 
-                ctx.fillStyle = "#fff"; 
-                ctx.fillText(i * 100, x + (r-75)*Math.cos(ang), y + (r-75)*Math.sin(ang)); 
-            }
+            if (isMajor) { ctx.fillStyle = "#fff"; ctx.fillText(i * 100, x + (r-75)*Math.cos(ang), y + (r-75)*Math.sin(ang)); }
         }
 
+        // 바늘
         let needleAng = (0.75 + (curRPM / 3000) * 1.5) * Math.PI;
         ctx.strokeStyle = "#ff3b30"; ctx.lineWidth = 12; ctx.lineCap = "round";
         ctx.beginPath(); ctx.moveTo(x, y);
         ctx.lineTo(x + (r-50)*Math.cos(needleAng), y + (r-50)*Math.sin(needleAng)); ctx.stroke();
-        
         ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(x, y, 18, 0, 7); ctx.fill();
-        
         requestAnimationFrame(draw);
     }
-    
     draw();
 </script>
 </body>
