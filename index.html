@@ -1,100 +1,128 @@
 <!DOCTYPE html>
-<html lang="ko">
+<html>
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Truck Control</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Truck RPM Control</title>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-gauges@2.1.7/gauge.min.js"></script>
     <style>
-        body { background: #121212; color: white; font-family: -apple-system, sans-serif; text-align: center; margin: 0; padding: 20px; overflow: hidden; user-select: none; }
-        .gauge-box { position: relative; width: 340px; height: 340px; margin: 0 auto; }
-        canvas { width: 340px; height: 340px; }
-        .val-text { font-size: 50px; font-weight: bold; color: #007aff; font-family: monospace; margin: 10px 0; }
-        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; max-width: 340px; margin: 10px auto; }
-        button { height: 80px; border-radius: 20px; border: none; font-size: 20px; font-weight: bold; color: white; background: #2c2c2e; transition: transform 0.1s; }
-        button:active { transform: scale(0.95); background: #3a3a3c; }
-        .res { background: #34c759; } .stp { background: #ff3b30; } .up { background: #007aff; } .dn { background: #ff9500; }
-        .scan-btn { background: #444; padding: 10px 25px; border-radius: 25px; margin-bottom: 10px; border: 1px solid #666; }
+        body { background-color: #121212; color: white; font-family: sans-serif; text-align: center; margin: 0; padding: 20px; }
+        .status { color: #4CAF50; font-size: 14px; margin-bottom: 10px; }
+        #connectBtn { background-color: #444; color: white; border: none; padding: 10px 30px; border-radius: 8px; font-weight: bold; cursor: pointer; margin-bottom: 20px; }
+        .grid-container { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; max-width: 400px; margin: 20px auto; }
+        .btn { padding: 25px; border-radius: 12px; font-size: 18px; font-weight: bold; border: none; cursor: pointer; color: white; }
+        .resume { background-color: #2ecc71; } .up { background-color: #007bff; }
+        .stop { background-color: #e74c3c; } .down { background-color: #f39c12; }
+        .baud-container { margin-top: 20px; display: flex; justify-content: center; gap: 10px; }
+        .baud-btn { background-color: #333; color: #888; border: 1px solid #555; padding: 10px 20px; border-radius: 5px; cursor: pointer; }
+        .baud-btn.active { background-color: #222; color: #007bff; border-color: #007bff; }
+        #baudStatus { font-size: 12px; color: #007bff; margin-top: 10px; }
+        .rpm-text { font-size: 48px; font-weight: bold; color: #007bff; margin-top: -30px; margin-bottom: 20px; }
     </style>
 </head>
 <body>
-    <button class="scan-btn" onclick="connect()">CONNECT TRUCK</button>
-    <div class="gauge-box"><canvas id="gauge" width="680" height="680"></canvas></div>
-    <div id="targetDisplay" class="val-text">0</div>
-    <div style="font-size: 14px; color: #8e8e93;">TARGET RPM</div>
-    <div class="grid">
-        <button class="res" onclick="send(1000)">RESUME</button>
-        <button class="up" ontouchstart="startAdjust(25)" ontouchend="stopAdjust()" onmousedown="startAdjust(25)" onmouseup="stopAdjust()">UP</button>
-        <button class="stp" onclick="send(600)">STOP</button>
-        <button class="dn" ontouchstart="startAdjust(-25)" ontouchend="stopAdjust()" onmousedown="startAdjust(-25)" onmouseup="stopAdjust()">DOWN</button>
+
+    <div id="status" class="status">연결 안됨</div>
+    <button id="connectBtn">CONNECT</button>
+
+    <canvas id="gauge-rpm"></canvas>
+    <div class="rpm-text" id="rpmVal">0</div>
+
+    <div class="grid-container">
+        <button class="btn resume" onclick="sendCmd(650)">RESUME</button>
+        <button class="btn up" onclick="sendCmd(1)">UP</button>
+        <button class="btn stop" onclick="sendCmd(600)">STOP</button>
+        <button class="btn down" onclick="sendCmd(2)">DOWN</button>
     </div>
 
-<script>
-    let char;
-    let curRPM = 0, tarRPM = 0, adjustTimer = null;
-    const canvas = document.getElementById('gauge');
-    const ctx = canvas.getContext('2d');
+    <div id="baudStatus">현재 속도: 확인 중...</div>
+    <div class="baud-container">
+        <button id="btn250" class="baud-btn" onclick="setBaud(250)">250kbps</button>
+        <button id="btn500" class="baud-btn" onclick="setBaud(500)">500kbps</button>
+    </div>
 
-    function startAdjust(v) {
-        if (!char) return;
-        adjust(v);
-        adjustTimer = setInterval(() => adjust(v), 150);
-    }
-    function stopAdjust() { clearInterval(adjustTimer); }
-    function adjust(v) { 
-        if (tarRPM === 0 && v > 0) tarRPM = 1000;
-        tarRPM = Math.max(1000, Math.min(2500, tarRPM + v)); 
-        send(tarRPM); 
-    }
+    <script>
+        let device, characteristic;
+        const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+        const CHAR_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
 
-    async function send(v) { if(char) await char.writeValue(new Uint8Array([v & 0xFF, (v >> 8) & 0xFF])); }
+        // Gauge 설정
+        var gauge = new RadialGauge({
+            renderTo: 'gauge-rpm', width: 300, height: 300, units: "RPM",
+            minValue: 0, maxValue: 3000,
+            majorTicks: ["0","500","1000","1500","2000","2500","3000"],
+            minorTicks: 2, strokeTicks: true,
+            highlights: [{ "from": 0, "to": 1000, "color": "rgba(0,0,255,.3)" }],
+            colorPlate: "#121212", colorMajorTicks: "#ddd", colorMinorTicks: "#666",
+            colorNumbers: "#eee", needleType: "arrow", needleWidth: 3,
+            valueBox: false, borderShadowWidth: 0, borders: false,
+            animationDuration: 1500, animationRule: "linear"
+        }).draw();
 
-    async function connect() {
-        try {
-            const dev = await navigator.bluetooth.requestDevice({
-                acceptAllDevices: true, optionalServices: ["4fafc201-1fb5-459e-8fcc-c5c9c331914b"]
-            });
-            const srv = await dev.gatt.connect();
-            const svc = await srv.getPrimaryService("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
-            char = await svc.getCharacteristic("beb5483e-36e1-4688-b7f5-ea07361b26a8");
-            await char.startNotifications();
-            char.addEventListener('characteristicvaluechanged', (e) => {
-                let v = e.target.value;
-                curRPM = v.getUint16(0, true);
-                tarRPM = v.getUint16(2, true);
-                document.getElementById('targetDisplay').innerText = tarRPM;
-            });
-        } catch (e) { alert("ERROR: " + e); }
-    }
+        document.getElementById('connectBtn').addEventListener('click', async () => {
+            try {
+                device = await navigator.bluetooth.requestDevice({
+                    filters: [{ name: "Truck_RPM_Control" }],
+                    optionalServices: [SERVICE_UUID]
+                });
+                const server = await device.gatt.connect();
+                const service = await server.getPrimaryService(SERVICE_UUID);
+                characteristic = await service.getCharacteristic(CHAR_UUID);
+                
+                document.getElementById('status').innerText = "연결됨: " + device.name;
+                document.getElementById('connectBtn').innerText = "DISCONNECT";
 
-    function draw() {
-        ctx.clearRect(0, 0, 680, 680);
-        const x = 340, y = 340, r = 280;
-        ctx.strokeStyle = "#333"; ctx.lineWidth = 25; ctx.beginPath();
-        ctx.arc(x, y, r, 0.75 * Math.PI, 2.25 * Math.PI); ctx.stroke();
-        if (tarRPM >= 1000) {
-            let tarAngle = (0.75 + (tarRPM / 3000) * 1.5) * Math.PI;
-            ctx.strokeStyle = "rgba(0, 122, 255, 0.6)"; ctx.lineWidth = 25;
-            ctx.beginPath(); ctx.arc(x, y, r, 0.75 * Math.PI, tarAngle); ctx.stroke();
+                await characteristic.startNotifications();
+                characteristic.addEventListener('characteristicvaluechanged', handleNotifications);
+                
+                // 연결 시 현재 상태 요청 (더미 데이터 전송)
+                sendCmd(0); 
+
+            } catch (error) {
+                console.log(error);
+                alert("연결 실패: " + error);
+            }
+        });
+
+        function handleNotifications(event) {
+            let data = event.target.value;
+            if (data.byteLength === 4) {
+                // RPM 데이터 수신 (Low Byte, High Byte)
+                let current = data.getUint16(0, true);
+                let target = data.getUint16(2, true);
+                gauge.value = current;
+                document.getElementById('rpmVal').innerText = current;
+            } else if (data.byteLength === 2) {
+                // 속도 설정 ACK 수신
+                let ack = data.getUint16(0, true);
+                updateBaudUI(ack);
+            }
         }
-        ctx.font = "bold 28px Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-        for (let i = 0; i <= 30; i++) {
-            let ang = (0.75 + (i / 30) * 1.5) * Math.PI;
-            let isMajor = i % 5 === 0;
-            ctx.strokeStyle = isMajor ? "#fff" : "#555"; ctx.lineWidth = isMajor ? 5 : 2;
-            ctx.beginPath();
-            ctx.moveTo(x + (r-10)*Math.cos(ang), y + (r-10)*Math.sin(ang));
-            ctx.lineTo(x + (r-35)*Math.cos(ang), y + (r-35)*Math.sin(ang));
-            ctx.stroke();
-            if (isMajor) { ctx.fillStyle = "#fff"; ctx.fillText(i * 100, x + (r-75)*Math.cos(ang), y + (r-75)*Math.sin(ang)); }
+
+        function updateBaudUI(val) {
+            const btn250 = document.getElementById('btn250');
+            const btn500 = document.getElementById('btn500');
+            const status = document.getElementById('baudStatus');
+
+            if (val === 0x2500) {
+                btn250.classList.add('active'); btn500.classList.remove('active');
+                status.innerText = "현재 속도: 250kbps";
+            } else if (val === 0x5000) {
+                btn500.classList.add('active'); btn250.classList.remove('active');
+                status.innerText = "현재 속도: 500kbps";
+            }
         }
-        let needleAng = (0.75 + (curRPM / 3000) * 1.5) * Math.PI;
-        ctx.strokeStyle = "#ff3b30"; ctx.lineWidth = 12; ctx.lineCap = "round";
-        ctx.beginPath(); ctx.moveTo(x, y);
-        ctx.lineTo(x + (r-50)*Math.cos(needleAng), y + (r-50)*Math.sin(needleAng)); ctx.stroke();
-        ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(x, y, 18, 0, 7); ctx.fill();
-        requestAnimationFrame(draw);
-    }
-    draw();
-</script>
+
+        async function sendCmd(val) {
+            if (!characteristic) return;
+            let data = new Uint16Array([val]);
+            await characteristic.writeValue(data);
+        }
+
+        function setBaud(baud) {
+            if (baud === 250) sendCmd(0x2500);
+            else if (baud === 500) sendCmd(0x5000);
+        }
+    </script>
 </body>
 </html>
