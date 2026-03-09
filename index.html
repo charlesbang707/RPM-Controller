@@ -6,20 +6,24 @@
     <title>Truck Control</title>
     <style>
         body { background: #121212; color: white; font-family: -apple-system, sans-serif; text-align: center; margin: 0; padding: 20px; overflow: hidden; user-select: none; }
+        #status { font-size: 14px; color: #888; margin-bottom: 10px; height: 20px; }
         .gauge-box { position: relative; width: 340px; height: 340px; margin: 0 auto; }
         canvas { width: 340px; height: 340px; }
         .val-text { font-size: 50px; font-weight: bold; color: #007aff; font-family: monospace; margin: 10px 0; }
         .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; max-width: 340px; margin: 10px auto; }
-        button { height: 70px; border-radius: 20px; border: none; font-size: 18px; font-weight: bold; color: white; background: #2c2c2e; transition: transform 0.1s; }
+        button { height: 70px; border-radius: 20px; border: none; font-size: 18px; font-weight: bold; color: white; background: #2c2c2e; }
         button:active { transform: scale(0.95); background: #3a3a3c; }
         .res { background: #34c759; } .stp { background: #ff3b30; } .up { background: #007aff; } .dn { background: #ff9500; }
-        .speed-bar { display: flex; justify-content: center; gap: 10px; margin-top: 20px; }
+        .speed-bar { display: flex; flex-direction: column; align-items: center; margin-top: 20px; gap: 10px; }
+        .speed-btns { display: flex; gap: 10px; }
         .speed-btn { height: 45px; font-size: 15px; padding: 0 25px; border: 2px solid #444; border-radius: 12px; background: #1c1c1e; color: #888; }
         .active-speed { border-color: #007aff; color: white; background: #007aff; }
+        #speedLabel { font-size: 16px; color: #007aff; font-weight: bold; }
     </style>
 </head>
 <body>
-    <button onclick="connect()" style="background:#444; height:45px; padding:0 35px; border-radius:12px; margin-bottom:10px;">CONNECT</button>
+    <div id="status">Disconnected</div>
+    <button onclick="connect()" style="background:#444; height:45px; padding:0 35px; border-radius:12px;">CONNECT</button>
     <div class="gauge-box"><canvas id="gauge" width="680" height="680"></canvas></div>
     <div id="targetDisplay" class="val-text">0</div>
     <div class="grid">
@@ -29,13 +33,17 @@
         <button class="dn" ontouchstart="startAdjust(-25)" ontouchend="stopAdjust()">DOWN</button>
     </div>
     <div class="speed-bar">
-        <button id="btn250" class="speed-btn active-speed" onclick="send(0x2500)">250kbps</button>
-        <button id="btn500" class="speed-btn" onclick="send(0x5000)">500kbps</button>
+        <div id="speedLabel">Current: ---</div>
+        <div class="speed-btns">
+            <button id="btn250" class="speed-btn" onclick="send(0x2500)">250kbps</button>
+            <button id="btn500" class="speed-btn" onclick="send(0x5000)">500kbps</button>
+        </div>
     </div>
 
 <script>
     let char, tarRPM = 0, curRPM = 0, adjustTimer = null;
     const canvas = document.getElementById('gauge'), ctx = canvas.getContext('2d');
+    const statusEl = document.getElementById('status');
 
     async function send(v) { 
         if(char) {
@@ -45,11 +53,15 @@
 
     async function connect() {
         try {
+            statusEl.innerText = "Searching...";
             const dev = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: ["4fafc201-1fb5-459e-8fcc-c5c9c331914b"] });
             const srv = await dev.gatt.connect();
             const svc = await srv.getPrimaryService("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
             char = await svc.getCharacteristic("beb5483e-36e1-4688-b7f5-ea07361b26a8");
             await char.startNotifications();
+            statusEl.innerText = "Connected: " + dev.name;
+            statusEl.style.color = "#34c759";
+            
             char.addEventListener('characteristicvaluechanged', (e) => {
                 let v = e.target.value;
                 curRPM = v.getUint16(0, true);
@@ -57,10 +69,10 @@
                 let is500 = v.getUint8(4);
                 document.getElementById('btn500').className = is500 ? "speed-btn active-speed" : "speed-btn";
                 document.getElementById('btn250').className = !is500 ? "speed-btn active-speed" : "speed-btn";
+                document.getElementById('speedLabel').innerText = "Current: " + (is500 ? "500kbps" : "250kbps");
                 document.getElementById('targetDisplay').innerText = tarRPM;
             });
-            alert("연결 성공!");
-        } catch (e) { alert("연결 실패: " + e); }
+        } catch (e) { statusEl.innerText = "Connection Failed"; statusEl.style.color = "#ff3b30"; }
     }
 
     function startAdjust(v) { adjust(v); adjustTimer = setInterval(() => adjust(v), 150); }
@@ -75,6 +87,14 @@
         ctx.clearRect(0, 0, 680, 680);
         const x = 340, y = 340, r = 280;
         ctx.strokeStyle = "#333"; ctx.lineWidth = 25; ctx.beginPath(); ctx.arc(x, y, r, 0.75 * Math.PI, 2.25 * Math.PI); ctx.stroke();
+        
+        // Demand Arc (Blue) - tarRPM이 0보다 크면 무조건 표시
+        if (tarRPM > 0) {
+            let tarAngle = (0.75 + (tarRPM / 3000) * 1.5) * Math.PI;
+            ctx.strokeStyle = "rgba(0, 122, 255, 0.4)"; ctx.lineWidth = 25;
+            ctx.beginPath(); ctx.arc(x, y, r, 0.75 * Math.PI, tarAngle); ctx.stroke();
+        }
+
         ctx.font = "bold 28px Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
         for (let i = 0; i <= 30; i++) {
             let ang = (0.75 + (i / 30) * 1.5) * Math.PI;
