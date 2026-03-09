@@ -3,26 +3,26 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Truck RPM Control</title>
+    <title>Mack Truck RPM Control</title>
     <script src="https://cdn.jsdelivr.net/npm/canvas-gauges@2.1.7/gauge.min.js"></script>
     <style>
         body { background-color: #121212; color: white; font-family: sans-serif; text-align: center; margin: 0; padding: 20px; }
-        .status { color: #4CAF50; font-size: 14px; margin-bottom: 10px; }
-        #connectBtn { background-color: #444; color: white; border: none; padding: 12px 35px; border-radius: 8px; font-weight: bold; cursor: pointer; margin-bottom: 20px; }
+        #connectBtn { background-color: #444; color: white; border: none; padding: 15px 50px; border-radius: 12px; font-size: 18px; font-weight: bold; cursor: pointer; margin-top: 10px; margin-bottom: 30px; }
         .grid-container { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; max-width: 400px; margin: 20px auto; }
-        .btn { padding: 30px; border-radius: 12px; font-size: 20px; font-weight: bold; border: none; cursor: pointer; color: white; }
-        .resume { background-color: #2ecc71; } .up { background-color: #3498db; }
+        .btn { padding: 35px; border-radius: 15px; font-size: 22px; font-weight: bold; border: none; cursor: pointer; color: white; text-transform: uppercase; }
+        .resume { background-color: #2ecc71; } .up { background-color: #007bff; }
         .stop { background-color: #e74c3c; } .down { background-color: #f39c12; }
-        .rpm-text { font-size: 54px; font-weight: bold; color: #3498db; margin-top: -30px; margin-bottom: 20px; }
+        .rpm-text { font-size: 72px; font-weight: bold; color: #007bff; margin-top: -20px; line-height: 1; }
+        .target-label { font-size: 14px; color: #888; margin-top: 5px; margin-bottom: 20px; text-transform: uppercase; letter-spacing: 1px; }
     </style>
 </head>
 <body>
 
-    <div id="status" class="status">Disconnected</div>
-    <button id="connectBtn">CONNECT</button>
+    <button id="connectBtn">CONNECT TRUCK</button>
 
     <canvas id="gauge-rpm"></canvas>
     <div class="rpm-text" id="rpmVal">0</div>
+    <div class="target-label">TARGET RPM</div>
 
     <div class="grid-container">
         <button class="btn resume" onclick="sendCmd(650)">RESUME</button>
@@ -37,11 +37,15 @@
         const CHAR_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
 
         var gauge = new RadialGauge({
-            renderTo: 'gauge-rpm', width: 320, height: 320, units: "RPM",
+            renderTo: 'gauge-rpm', width: 350, height: 350, units: "",
             minValue: 0, maxValue: 3000,
             majorTicks: ["0","500","1000","1500","2000","2500","3000"],
-            colorPlate: "#121212", colorMajorTicks: "#ddd", colorNumbers: "#eee",
-            needleType: "arrow", needleWidth: 3, valueBox: false, borders: false
+            minorTicks: 5, strokeTicks: true,
+            highlights: [{ "from": 2100, "to": 3000, "color": "rgba(200, 50, 50, .3)" }],
+            colorPlate: "transparent", colorMajorTicks: "#ddd", colorMinorTicks: "#444",
+            colorNumbers: "#eee", needleType: "arrow", needleWidth: 3,
+            valueBox: false, borderShadowWidth: 0, borders: false,
+            animationDuration: 100, animationRule: "linear"
         }).draw();
 
         document.getElementById('connectBtn').addEventListener('click', async () => {
@@ -54,14 +58,14 @@
                 const service = await server.getPrimaryService(SERVICE_UUID);
                 characteristic = await service.getCharacteristic(CHAR_UUID);
                 
-                document.getElementById('status').innerText = "Connected";
+                document.getElementById('connectBtn').innerText = "CONNECTED";
                 await characteristic.startNotifications();
-                characteristic.addEventListener('characteristicvaluechanged', (e) => {
-                    let val = e.target.value.getUint16(0, true);
+                characteristic.addEventListener('characteristicvaluechanged', (event) => {
+                    let val = event.target.value.getUint16(0, true);
                     gauge.value = val;
                     document.getElementById('rpmVal').innerText = val;
                 });
-            } catch (err) { console.log(err); }
+            } catch (error) { console.log(error); }
         });
 
         async function sendCmd(val) {
