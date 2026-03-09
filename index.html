@@ -46,8 +46,8 @@
         }
     }
     
+    // 문제의 팝업(confirm) 창을 완전히 제거했습니다. 누르면 즉시 변경 명령이 날아갑니다.
     function changeSpeed(cmd) {
-        if(!confirm("통신 속도를 변경하시겠습니까? 트럭 연결이 잠시 끊길 수 있습니다.")) return;
         send(cmd);
     }
 
@@ -63,7 +63,6 @@
                 curRPM = v.getUint16(0, true);
                 tarRPM = v.getUint16(2, true);
                 
-                // 5번째 바이트에서 속도 정보 읽기 (기본값 처리 포함)
                 if (v.byteLength >= 5) {
                     let is500 = v.getUint8(4);
                     document.getElementById('btn500').className = is500 ? "speed-btn active-speed" : "speed-btn";
@@ -88,18 +87,15 @@
         ctx.clearRect(0, 0, 680, 680);
         const x = 340, y = 340, r = 280;
         
-        // 1. 외곽 베젤
         ctx.strokeStyle = "#333"; ctx.lineWidth = 25; ctx.beginPath(); 
         ctx.arc(x, y, r, 0.75 * Math.PI, 2.25 * Math.PI); ctx.stroke();
         
-        // 2. 파란색 목표 RPM 아크
         if (tarRPM >= 1000) {
             let tarAngle = (0.75 + (tarRPM / 3000) * 1.5) * Math.PI;
             ctx.strokeStyle = "rgba(0, 122, 255, 0.6)"; ctx.lineWidth = 25;
             ctx.beginPath(); ctx.arc(x, y, r, 0.75 * Math.PI, tarAngle); ctx.stroke();
         }
 
-        // 3. 눈금과 숫자 그리기 (이 부분이 복구되었습니다!)
         ctx.font = "bold 28px Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
         for (let i = 0; i <= 30; i++) {
             let ang = (0.75 + (i / 30) * 1.5) * Math.PI;
@@ -111,26 +107,22 @@
             ctx.lineTo(x + (r-35)*Math.cos(ang), y + (r-35)*Math.sin(ang));
             ctx.stroke();
             
-            // 숫자 출력 (0, 500, 1000...)
             if (isMajor) { 
                 ctx.fillStyle = "#fff"; 
                 ctx.fillText(i * 100, x + (r-75)*Math.cos(ang), y + (r-75)*Math.sin(ang)); 
             }
         }
 
-        // 4. 빨간색 현재 RPM 바늘
         let needleAng = (0.75 + (curRPM / 3000) * 1.5) * Math.PI;
         ctx.strokeStyle = "#ff3b30"; ctx.lineWidth = 12; ctx.lineCap = "round";
         ctx.beginPath(); ctx.moveTo(x, y);
         ctx.lineTo(x + (r-50)*Math.cos(needleAng), y + (r-50)*Math.sin(needleAng)); ctx.stroke();
         
-        // 5. 중심축
         ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(x, y, 18, 0, 7); ctx.fill();
         
         requestAnimationFrame(draw);
     }
     
-    // 페이지 로드 시 그리기 시작
     draw();
 </script>
 </body>
